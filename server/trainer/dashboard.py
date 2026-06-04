@@ -37,7 +37,18 @@ _HTML = Path(__file__).parent / "dashboard.html"
 
 MANAGER: TrainingManager | None = None
 PLAY: dict = {"parallel": 2, "difficulty": "beginner", "delay": 0.22}
+# Subscribers = per-connection emit callables; the online player broadcasts to all of them.
+_SUBSCRIBERS: set = set()
+ONLINE: dict = {"player": None, "task": None}
 app = FastAPI(title="Minesweeper AI — Management")
+
+
+def broadcast(frame: dict) -> None:
+    for emit in list(_SUBSCRIBERS):
+        try:
+            emit(frame)
+        except Exception:  # noqa: BLE001 - one slow client must not break others
+            pass
 
 
 def _read_latest_episode(log_path: Path, csv_path: Path) -> int:
@@ -130,6 +141,30 @@ async def set_play(request: Request) -> JSONResponse:
     return JSONResponse(PLAY)
 
 
+@app.post("/api/online")
+async def online_ctl(request: Request) -> JSONResponse:
+    """Start/stop playing a real minesweeper.online game (personal demo; rate-limited)."""
+    assert MANAGER is not None
+    body = await request.json()
+    action = body.get("action")
+    if action == "start":
+        url = (body.get("url") or "").strip()
+        if not url.startswith("http"):
+            return JSONResponse({"error": "provide a full https game URL"}, status_code=400)
+        if ONLINE["player"] is not None:
+            ONLINE["player"].request_stop()
+        from trainer.online import OnlinePlayer
+
+        player = OnlinePlayer(MANAGER.play_act, delay=float(body.get("delay", 0.5)))
+        ONLINE["player"] = player
+        ONLINE["task"] = asyncio.create_task(player.run(url, broadcast))
+        return JSONResponse({"status": "starting", "url": url})
+    if action == "stop" and ONLINE["player"] is not None:
+        ONLINE["player"].request_stop()
+        return JSONResponse({"status": "stopping"})
+    return JSONResponse({"status": ONLINE["player"].status if ONLINE["player"] else "idle"})
+
+
 @app.websocket("/ws")
 async def ws(websocket: WebSocket) -> None:
     assert MANAGER is not None
@@ -141,6 +176,8 @@ async def ws(websocket: WebSocket) -> None:
             queue.put_nowait(msg)
         except asyncio.QueueFull:
             pass  # drop frames if the client is slow
+
+    _SUBSCRIBERS.add(emit)  # receive online-play broadcasts too
 
     async def board_task(slot: int) -> None:
         while True:
@@ -232,6 +269,7 @@ async def ws(websocket: WebSocket) -> None:
     except WebSocketDisconnect:
         pass
     finally:
+        _SUBSCRIBERS.discard(emit)
         for t in tasks:
             t.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)

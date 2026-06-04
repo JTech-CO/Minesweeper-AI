@@ -137,6 +137,17 @@
 
   <div>
     <section class="panel">
+      <h2>Live: minesweeper.online (real site)</h2>
+      <div class="row">
+        <input type="text" id="online_url" placeholder="https://minesweeper.online/game/..."
+               style="flex:1; min-width:240px;" />
+        <button class="primary" id="online_start">Play</button>
+        <button class="warn" id="online_stop">Stop</button>
+      </div>
+      <div class="hint" id="online_status">실제 사이트는 <b>보이는 브라우저 창</b>에서 플레이됩니다. 진행 중인 게임 URL을 붙여넣고 Play를 누르세요. (개인 시연·레이트제한·사이트 약관 준수)</div>
+      <div id="online_board_wrap" style="margin-top:10px;"></div>
+    </section>
+    <section class="panel">
       <h2>Play sessions</h2>
       <div class="row">
         <label class="fld">parallel boards
@@ -210,6 +221,25 @@ function renderBoard(slot, cells, last){
 function removeBoard(slot){ const o = slots[slot]; if (o){ o.panel.remove(); delete slots[slot]; } }
 function pruneBoards(n){ for (const s of Object.keys(slots)) if (+s >= n) removeBoard(+s); }
 
+// ---- online (real site) board ----
+let onlineCells = [];
+function buildOnlineGrid(rows, cols){
+  const wrap = $("online_board_wrap"); wrap.innerHTML = "";
+  const grid = document.createElement("div"); grid.className = "grid";
+  const sz = Math.max(10, Math.min(26, Math.floor(360/cols)));
+  grid.style.gridTemplateColumns = `repeat(${cols}, ${sz}px)`;
+  onlineCells = [];
+  for (let i=0;i<rows*cols;i++){
+    const d = document.createElement("div");
+    d.className = "cell hidden"; d.style.width = sz+"px"; d.style.height = sz+"px"; d.style.fontSize = Math.max(8,sz-9)+"px";
+    grid.appendChild(d); onlineCells.push(d);
+  }
+  wrap.appendChild(grid);
+}
+function renderOnline(cells){
+  for (let i=0;i<cells.length;i++){ const {cls,txt}=cellView(cells[i]); const el=onlineCells[i]; if(!el)continue; el.className="cell "+cls; el.textContent=txt; }
+}
+
 // ---- websocket ----
 function connect(){
   const ws = new WebSocket(`ws://${location.host}/ws`);
@@ -225,6 +255,19 @@ function connect(){
     } else if (m.type === "board_result") {
       const o = slots[m.slot]; if (o) o.stat.innerHTML = (m.won?`<span style="color:var(--safe)">WON</span>`:`<span style="color:var(--danger)">LOST</span>`) + ` · ${m.moves}수 · ${(m.elapsedMs/1000).toFixed(1)}s`;
     } else if (m.type === "board_remove") removeBoard(m.slot);
+    else if (m.type === "online_start") buildOnlineGrid(m.rows, m.cols);
+    else if (m.type === "online_board") {
+      renderOnline(m.cells);
+      $("online_status").textContent = `${m.rows}×${m.cols} · ${m.move}수 · ${m.status}` + (m.mines!=null?` · mines ${m.mines}`:"");
+    } else if (m.type === "online_result") {
+      $("online_status").innerHTML = m.won
+        ? `<span style="color:var(--safe)">WON</span> in ${m.moves} moves`
+        : `<span style="color:var(--danger)">LOST</span> in ${m.moves} moves`;
+    } else if (m.type === "online_error") {
+      $("online_status").innerHTML = `<span style="color:var(--danger)">${m.msg}</span>`;
+    } else if (m.type === "online_status") {
+      $("online_status").textContent = "browser: " + m.status;
+    }
   };
 }
 connect();
@@ -288,6 +331,13 @@ $("btn_apply").onclick = () => post("/api/config", {
   train_freq:parseInt($("train_freq").value), eps_end:parseFloat($("eps_end").value)});
 $("parallel").onchange = () => post("/api/play", {parallel:parseInt($("parallel").value)});
 $("difficulty").onchange = () => post("/api/play", {difficulty:$("difficulty").value});
+$("online_start").onclick = () => {
+  const u = $("online_url").value.trim();
+  if (!u){ $("online_status").textContent = "진행 중인 게임 URL을 입력하세요."; return; }
+  $("online_status").textContent = "starting browser…";
+  post("/api/online", {action:"start", url:u});
+};
+$("online_stop").onclick = () => post("/api/online", {action:"stop"});
 
 function drawChart(series){
   const cv=$("chart"), ctx=cv.getContext("2d"), W=cv.width, H=cv.height, pad=34;
