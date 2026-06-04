@@ -41,6 +41,7 @@
 - 실행: `python -m trainer.train --difficulty beginner --train-freq 4 --gate 0.85 --tag beginner ...` (PID는 `server/storage/checkpoints/beginner.pid`).
 - 로그: `server/storage/checkpoints/beginner.out`(stdout) / `beginner.err`(stderr) / `beginner_metrics.csv`(eval 추이). 체크포인트: `beginner_best.pt`.
 - 모니터: `Get-Content beginner.out -Tail 20` 또는 `beginner_metrics.csv` 확인. 첫 eval=ep 5000. 게이트 도달 시 자동 종료.
+- **라이브 뷰어**(별도 터미널): `python -m trainer.watch --tag beginner` → 좌측 AI 플레이(한 수씩·컬러), 우측 메트릭/승률 스파크라인. 체크포인트를 게임마다 리로드해 학습 진척 반영. (풀 웹 대시보드는 M8.)
 - 멈출 때: `Stop-Process -Id <pid>`.
 > 학습 평평하면 런북 4(마스킹은 검증됨). 0.85 미도달·정체 시 하이퍼파라미터(lr·eps decay·width) 튜닝은 후속.
 
@@ -84,3 +85,4 @@
 - **2026-06-04**: M3 DB 블로커(Docker/PG 미설치) → 사용자 SQLite 승인. 서버 venv(Python 3.14) + 의존성 설치. FastAPI 골격(config/deps/db/session/models/schemas/api: /health·models CRUD·training·benchmark) + Alembic(초기 마이그레이션, SQLite `upgrade head` 성공, `alembic check` 무드리프트). pytest 3 그린, ruff 클린, uvicorn 실기동 /health 200. M3 DoD 4항목 통과. 다음: **M4 trainer — 단, torch용 Python 3.12 설치 필요(블로커 가능성)**.
 - **2026-06-04**: M4 착수. uv로 Python 3.12 설치, venv 재생성, torch 2.6.0+cu124 설치 → `torch.cuda.is_available()` True(RTX 4060). `trainer/env.py`(board.ts 1:1 재현) + `tests/test_env.py` 12 그린 → M4 DoD #4 충족. pytest 15, ruff 클린. **다음: encoding/model/replay/dqn/reward/train 구현 + Beginner 학습→승률 게이트(장시간).**
 - **2026-06-04**: M4 트레이너 전부 구현(encoding/model/replay(PER)/dqn(Double DQN·n-step·마스킹)/reward/train/evaluate) + shape 테스트 5. sanity(5×5×3) eval 0.32→0.66 단조상승·loss 안정, 체크포인트 재로드 재현(0.66→0.66) → DoD #2·#3·#4 충족. **Beginner 학습 background 시작(PID `beginner.pid`).** 남은 것: DoD #1(승률 0.85 게이트). pytest 20, ruff 클린.
+- **2026-06-04**: 사용자 요청으로 **라이브 터미널 뷰어 `trainer/watch.py`** 추가(rich). AI 플레이(한 수씩·컬러) + 학습 메트릭/승률 스파크라인 실시간. 백그라운드 학습의 체크포인트·로그·CSV를 읽어 반영. smoke 통과, ruff 클린. (M8 웹 대시보드 전까지의 경량 관찰 도구.)

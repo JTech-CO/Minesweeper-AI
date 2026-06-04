@@ -42,6 +42,17 @@ pytest                              # /health + 모델 CRUD
 ruff check . && ruff format --check .
 ```
 
+### 학습 + 실시간 관찰 (M4)
+
+```bash
+# 학습 시작 (백그라운드 권장: 로그/메트릭/체크포인트가 storage/checkpoints에 쌓임)
+python -m trainer.train --difficulty beginner --train-freq 4 --gate 0.85 --tag beginner
+
+# 다른 터미널에서 라이브 뷰어: 좌측=AI 플레이(한 수씩, 컬러), 우측=학습 메트릭/승률 곡선
+python -m trainer.watch --tag beginner
+```
+> 풀 웹 대시보드(실시간 차트 + 플레이 시각화)는 M8 산출물이며, `trainer/watch.py`는 그전까지의 경량 터미널 관찰 도구다.
+
 ## 진행 상태
 
 | Phase | 내용 | 상태 |
