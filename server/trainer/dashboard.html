@@ -57,9 +57,10 @@
   .board-panel { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:10px; }
   .board-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;
     font-size:12px; color:var(--muted); }
-  .grid { display:grid; gap:1px; justify-content:center; }
+  .grid { display:grid; gap:1px; width:100%; }
   .cell { display:flex; align-items:center; justify-content:center; border-radius:2px; font-weight:700;
-    font-family:ui-monospace,Consolas,monospace; background:var(--surface2); }
+    font-family:ui-monospace,Consolas,monospace; background:var(--surface2);
+    aspect-ratio:1; overflow:hidden; line-height:1; min-width:0; }
   .cell.hidden { background:#222a35; }
   .cell.open { background:#10151c; color:var(--muted); }
   .cell.n1 { color:var(--n1); } .cell.n2 { color:var(--n2); } .cell.n3 { color:var(--n3); }
@@ -173,6 +174,15 @@
 </main>
 <script>
 const $ = (id) => document.getElementById(id);
+
+// Keep cell text sized to the (fluid) cell width; refit when the panel/grid resizes.
+const _ro = new ResizeObserver((entries) => { for (const e of entries) fitFontGrid(e.target); });
+function fitFontGrid(grid){
+  const c = grid.firstElementChild; if (!c) return;
+  const w = c.clientWidth; if (w > 0) grid.style.fontSize = Math.max(6, Math.floor(w * 0.6)) + "px";
+}
+function watchFont(grid){ _ro.observe(grid); requestAnimationFrame(() => fitFontGrid(grid)); }
+
 const NUMCLASS = {0:"open",1:"open n1",2:"open n2",3:"open n3",4:"open n4",5:"open n5",6:"open n6",7:"open n7",8:"open n8"};
 function cellView(v){
   if (v === -1) return {cls:"hidden", txt:""};
@@ -199,15 +209,14 @@ function ensureBoard(slot){
 }
 function buildGrid(slot, rows, cols){
   const o = ensureBoard(slot);
-  const sz = Math.max(7, Math.min(24, Math.floor(260/cols)));
-  o.grid.style.gridTemplateColumns = `repeat(${cols}, ${sz}px)`;
+  o.grid.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
   o.grid.innerHTML = ""; o.cells = []; o.cols = cols;
   for (let i=0;i<rows*cols;i++){
     const d = document.createElement("div");
     d.className = "cell hidden";
-    d.style.width = sz+"px"; d.style.height = sz+"px"; d.style.fontSize = Math.max(7,sz-9)+"px";
     o.grid.appendChild(d); o.cells.push(d);
   }
+  watchFont(o.grid);
 }
 function renderBoard(slot, cells, last){
   const o = slots[slot]; if (!o) return;
@@ -218,7 +227,7 @@ function renderBoard(slot, cells, last){
     el.textContent = txt;
   }
 }
-function removeBoard(slot){ const o = slots[slot]; if (o){ o.panel.remove(); delete slots[slot]; } }
+function removeBoard(slot){ const o = slots[slot]; if (o){ _ro.unobserve(o.grid); o.panel.remove(); delete slots[slot]; } }
 function pruneBoards(n){ for (const s of Object.keys(slots)) if (+s >= n) removeBoard(+s); }
 
 // ---- online (real site) board ----
@@ -226,15 +235,16 @@ let onlineCells = [];
 function buildOnlineGrid(rows, cols){
   const wrap = $("online_board_wrap"); wrap.innerHTML = "";
   const grid = document.createElement("div"); grid.className = "grid";
-  const sz = Math.max(10, Math.min(26, Math.floor(360/cols)));
-  grid.style.gridTemplateColumns = `repeat(${cols}, ${sz}px)`;
+  grid.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+  grid.style.maxWidth = "480px";  // bounded but fluid (won't overflow narrow panels)
   onlineCells = [];
   for (let i=0;i<rows*cols;i++){
     const d = document.createElement("div");
-    d.className = "cell hidden"; d.style.width = sz+"px"; d.style.height = sz+"px"; d.style.fontSize = Math.max(8,sz-9)+"px";
+    d.className = "cell hidden";
     grid.appendChild(d); onlineCells.push(d);
   }
   wrap.appendChild(grid);
+  watchFont(grid);
 }
 function renderOnline(cells){
   for (let i=0;i<cells.length;i++){ const {cls,txt}=cellView(cells[i]); const el=onlineCells[i]; if(!el)continue; el.className="cell "+cls; el.textContent=txt; }
