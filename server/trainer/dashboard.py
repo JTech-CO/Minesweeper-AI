@@ -1,15 +1,14 @@
-"""Web dashboard: watch the trained model play Minesweeper live in the browser.
+"""Integrated management dashboard (control plane).
 
-    python -m trainer.dashboard --tag beginner        # opens http://127.0.0.1:8800
+Owns a TrainingManager (in-process training) so the browser can pause/resume training,
+change hyperparameters live, watch GPU stats (read-only — no overclock), and run 1–8
+parallel play sessions at a chosen difficulty. The model's lifetime trained-session count
+is persisted by the manager and keeps counting across dashboard restarts.
 
-The server loads the latest checkpoint and plays boards move-by-move, streaming each
-click (board state, chosen cell, elapsed solve time, win/loss) to the browser over a
-WebSocket. A side panel polls the training metrics (win-rate curve, loss, ε) from the
-background run's CSV/log. This is a dev preview that reuses the FastAPI stack; the polished
-React dashboard with client-side ONNX inference is the M8 deliverable.
+    python -m trainer.dashboard            # resumes from beginner_best.pt, opens browser
 
-The page (dashboard.html) follows the dark "instrument" tokens (디자인백서 §5) and the
-anti-cliché rules (no neon, no gradient text, no glassmorphism, no decorative emoji).
+The full React + client-ONNX dashboard is still the M8 deliverable; this reuses the
+FastAPI stack and follows the dark instrument tokens (anti-cliché).
 """
 
 from __future__ import annotations
@@ -23,43 +22,46 @@ import socket
 import threading
 import time
 import webbrowser
-from dataclasses import dataclass
 from pathlib import Path
 
-import numpy as np
-import torch
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from trainer.encoding import encode
 from trainer.env import DIFFICULTIES, MinesweeperEnv
-from trainer.watch import load_agent  # checkpoint (re)loader shared with the terminal viewer
+from trainer.manager import TrainingManager
 
-_EP_RE = re.compile(
-    r"ep\s+(\d+)\s+step\s+(\d+)\s+train_wr\s+([\d.]+)\s+loss\s+([\d.nan]+)\s+eps\s+([\d.]+)\s+sps\s+([\d.]+)"
-)
+_EP_RE = re.compile(r"ep\s+(\d+)\s+step")
 _HTML = Path(__file__).parent / "dashboard.html"
 
-
-@dataclass
-class Config:
-    ckpt_path: Path
-    csv_path: Path
-    log_path: Path
-    difficulty: str
-    delay: float
-    end_delay: float
-    device: str
+MANAGER: TrainingManager | None = None
+PLAY: dict = {"parallel": 2, "difficulty": "beginner", "delay": 0.22}
+app = FastAPI(title="Minesweeper AI — Management")
 
 
-CFG: Config | None = None
-app = FastAPI(title="Minesweeper AI Dashboard")
+def _read_latest_episode(log_path: Path, csv_path: Path) -> int:
+    if log_path.exists():
+        try:
+            for line in reversed(
+                log_path.read_text(encoding="utf-8", errors="ignore").splitlines()[-60:]
+            ):
+                m = _EP_RE.search(line)
+                if m:
+                    return int(m.group(1))
+        except OSError:
+            pass
+    if csv_path.exists():
+        try:
+            rows = list(csv.DictReader(csv_path.open(newline="")))
+            if rows:
+                return int(rows[-1]["episode"])
+        except (OSError, ValueError, KeyError):
+            pass
+    return 0
 
 
 def serialize_board(env: MinesweeperEnv) -> list[int]:
-    """Per-cell render code: -1 hidden, 0..8 revealed number, -2 mine, -3 exploded, -4 flag.
-    On a loss, all mines are surfaced (classic reveal-on-loss)."""
     lost = env.status == "lost"
     out: list[int] = []
     for i in range(env.n):
@@ -76,155 +78,167 @@ def serialize_board(env: MinesweeperEnv) -> list[int]:
     return out
 
 
-def read_metrics() -> dict:
-    assert CFG is not None
-    series: list[dict] = []
-    latest: dict = {}
-    if CFG.csv_path.exists():
-        try:
-            with CFG.csv_path.open(newline="") as f:
-                rows = list(csv.DictReader(f))
-            for r in rows:
-                try:
-                    series.append(
-                        {
-                            "episode": int(r["episode"]),
-                            "train_wr": float(r["train_wr"]),
-                            "eval_wr": float(r["eval_wr"]),
-                        }
-                    )
-                except (ValueError, KeyError):
-                    continue
-            if rows:
-                last = rows[-1]
-                latest = {
-                    "episode": int(last["episode"]),
-                    "global_step": int(last["global_step"]),
-                    "train_wr": float(last["train_wr"]),
-                    "eval_wr": float(last["eval_wr"]),
-                    "loss": last["loss"],
-                    "eps": float(last["eps"]),
-                    "sps": float(last["sps"]),
-                }
-        except OSError:
-            pass
-    if CFG.log_path.exists():
-        try:
-            with CFG.log_path.open(encoding="utf-8", errors="ignore") as f:
-                tail = f.readlines()[-40:]
-            for line in reversed(tail):
-                m = _EP_RE.search(line)
-                if m:
-                    latest.update(
-                        episode=int(m.group(1)),
-                        global_step=int(m.group(2)),
-                        train_wr=float(m.group(3)),
-                        loss=m.group(4),
-                        eps=float(m.group(5)),
-                        sps=float(m.group(6)),
-                    )
-                    break
-        except OSError:
-            pass
-    return {"series": series, "latest": latest}
-
-
 @app.get("/", response_class=HTMLResponse)
 def index() -> str:
-    # Read fresh each request so the page can be tweaked without restarting the server.
     return _HTML.read_text(encoding="utf-8")
 
 
-@app.get("/metrics")
-def metrics() -> JSONResponse:
-    return JSONResponse(read_metrics())
+@app.get("/api/status")
+def status() -> JSONResponse:
+    assert MANAGER is not None
+    return JSONResponse({**MANAGER.snapshot(), "play": PLAY, "difficulties": list(DIFFICULTIES)})
+
+
+@app.post("/api/control")
+async def control(request: Request) -> JSONResponse:
+    assert MANAGER is not None
+    body = await request.json()
+    action = body.get("action")
+    if action == "pause":
+        MANAGER.pause()
+    elif action == "resume":
+        MANAGER.resume()
+    elif action == "start":
+        MANAGER.start()
+    elif action == "stop":
+        MANAGER.stop()
+    return JSONResponse({"status": MANAGER.status})
+
+
+@app.post("/api/config")
+async def config(request: Request) -> JSONResponse:
+    assert MANAGER is not None
+    body = await request.json()
+    MANAGER.set_config(
+        lr=body.get("lr"),
+        batch=body.get("batch"),
+        train_freq=body.get("train_freq"),
+        eps_end=body.get("eps_end"),
+    )
+    from dataclasses import asdict
+
+    return JSONResponse(asdict(MANAGER.cfg))
+
+
+@app.post("/api/play")
+async def set_play(request: Request) -> JSONResponse:
+    body = await request.json()
+    if "parallel" in body:
+        PLAY["parallel"] = max(1, min(8, int(body["parallel"])))
+    if "difficulty" in body and body["difficulty"] in DIFFICULTIES:
+        PLAY["difficulty"] = body["difficulty"]
+    return JSONResponse(PLAY)
 
 
 @app.websocket("/ws")
-async def ws_play(ws: WebSocket) -> None:
-    assert CFG is not None
-    await ws.accept()
-    device = torch.device(CFG.device)
-    state = (None, DIFFICULTIES[CFG.difficulty], None, None)
-    games = wins = 0
-    try:
+async def ws(websocket: WebSocket) -> None:
+    assert MANAGER is not None
+    await websocket.accept()
+    queue: asyncio.Queue = asyncio.Queue(maxsize=400)
+
+    def emit(msg: dict) -> None:
+        try:
+            queue.put_nowait(msg)
+        except asyncio.QueueFull:
+            pass  # drop frames if the client is slow
+
+    async def board_task(slot: int) -> None:
         while True:
-            state = load_agent(CFG.ckpt_path, device, state)
-            agent, board, meta, _ = state
-            rows, cols, mines = board
-            games += 1
-            env = MinesweeperEnv(rows, cols, mines, seed=random.randrange(2**31))
+            diff = PLAY["difficulty"]
+            r, c, m = DIFFICULTIES[diff]
+            env = MinesweeperEnv(r, c, m, seed=random.randrange(2**31))
             env.reset()
-            await ws.send_json(
+            emit(
                 {
-                    "type": "start",
-                    "rows": rows,
-                    "cols": cols,
-                    "mines": mines,
-                    "game": games,
-                    "ckpt": (
-                        {"eval_wr": meta.get("eval_wr"), "episode": meta.get("episode")}
-                        if meta
-                        else None
-                    ),
+                    "type": "board_start",
+                    "slot": slot,
+                    "rows": r,
+                    "cols": c,
+                    "mines": m,
+                    "difficulty": diff,
                 }
             )
             start = time.monotonic()
             move = 0
             while env.status in ("ready", "playing"):
-                mask = env.legal_action_mask()
-                if agent is not None:
-                    action = agent.act(encode(env), mask, eps=0.0)
-                else:
-                    action = int(np.random.choice(np.flatnonzero(mask)))
+                action = MANAGER.play_act(encode(env), env.legal_action_mask())
                 env.step(action)
                 move += 1
-                await ws.send_json(
+                emit(
                     {
-                        "type": "step",
-                        "board": serialize_board(env),
+                        "type": "board",
+                        "slot": slot,
+                        "cells": serialize_board(env),
                         "last": int(action),
                         "move": move,
                         "status": env.status,
                         "elapsedMs": round((time.monotonic() - start) * 1000, 1),
                     }
                 )
-                await asyncio.sleep(CFG.delay)
-            if env.status == "won":
-                wins += 1
-            await ws.send_json(
+                await asyncio.sleep(PLAY["delay"])
+            emit(
                 {
-                    "type": "result",
+                    "type": "board_result",
+                    "slot": slot,
                     "won": env.status == "won",
                     "moves": move,
                     "elapsedMs": round((time.monotonic() - start) * 1000, 1),
-                    "games": games,
-                    "wins": wins,
                 }
             )
-            await asyncio.sleep(CFG.end_delay)
+            await asyncio.sleep(1.0)
+
+    async def status_task() -> None:
+        while True:
+            emit({"type": "status", **MANAGER.snapshot(), "play": PLAY})
+            await asyncio.sleep(1.0)
+
+    async def supervisor() -> None:
+        boards: dict[int, asyncio.Task] = {}
+        last_diff = PLAY["difficulty"]
+        try:
+            while True:
+                if PLAY["difficulty"] != last_diff:  # difficulty changed → restart all boards
+                    last_diff = PLAY["difficulty"]
+                    for slot, t in list(boards.items()):
+                        t.cancel()
+                        emit({"type": "board_remove", "slot": slot})
+                    boards.clear()
+                target = PLAY["parallel"]
+                for slot in range(target):
+                    if slot not in boards or boards[slot].done():
+                        boards[slot] = asyncio.create_task(board_task(slot))
+                for slot in list(boards):
+                    if slot >= target:
+                        boards[slot].cancel()
+                        del boards[slot]
+                        emit({"type": "board_remove", "slot": slot})
+                await asyncio.sleep(0.4)
+        finally:
+            for t in boards.values():
+                t.cancel()
+
+    async def writer() -> None:
+        while True:
+            await websocket.send_json(await queue.get())
+
+    tasks = [
+        asyncio.create_task(status_task()),
+        asyncio.create_task(supervisor()),
+        asyncio.create_task(writer()),
+    ]
+    try:
+        while True:
+            await websocket.receive_text()  # only used to detect disconnect
     except WebSocketDisconnect:
-        return
-
-
-def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser()
-    p.add_argument("--tag", default="beginner")
-    p.add_argument("--dir", default="storage/checkpoints")
-    p.add_argument("--ckpt", default=None)
-    p.add_argument("--difficulty", choices=list(DIFFICULTIES), default="beginner")
-    p.add_argument("--delay", type=float, default=0.25, help="seconds between moves")
-    p.add_argument("--end-delay", type=float, default=1.6, help="seconds to hold a finished board")
-    p.add_argument("--port", type=int, default=8800)
-    p.add_argument("--device", default="cpu")
-    p.add_argument("--no-open", action="store_true")
-    return p.parse_args()
+        pass
+    finally:
+        for t in tasks:
+            t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 def _open_browser_when_ready(host: str, port: int, url: str) -> None:
-    """Wait until the server is actually accepting connections, THEN open the browser.
-    Avoids the race where a fixed-delay open fires before uvicorn has bound the port."""
-    for _ in range(60):  # up to ~15s
+    for _ in range(60):
         try:
             with socket.create_connection((host, port), timeout=0.5):
                 break
@@ -233,30 +247,49 @@ def _open_browser_when_ready(host: str, port: int, url: str) -> None:
     print(f"[dashboard] ready  →  open {url}", flush=True)
     try:
         webbrowser.open(url)
-    except Exception:  # noqa: BLE001 - opening a browser is best-effort
+    except Exception:  # noqa: BLE001
         print("[dashboard] (auto-open failed; open the URL above manually)", flush=True)
 
 
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser()
+    p.add_argument("--dir", default="storage/checkpoints")
+    p.add_argument("--bootstrap-tag", default="beginner", help="run to resume weights/count from")
+    p.add_argument("--difficulty", choices=list(DIFFICULTIES), default="beginner")
+    p.add_argument("--port", type=int, default=8800)
+    p.add_argument("--device", default="cuda")
+    p.add_argument("--no-open", action="store_true")
+    p.add_argument("--no-train", action="store_true", help="serve without starting training")
+    return p.parse_args()
+
+
 def main() -> None:
-    global CFG
+    global MANAGER
     args = parse_args()
     base = Path(args.dir)
-    CFG = Config(
-        ckpt_path=Path(args.ckpt) if args.ckpt else base / f"{args.tag}_best.pt",
-        csv_path=base / f"{args.tag}_metrics.csv",
-        log_path=base / f"{args.tag}.out",
-        difficulty=args.difficulty,
-        delay=args.delay,
-        end_delay=args.end_delay,
-        device=args.device,
+    boot_ckpt = base / f"{args.bootstrap_tag}_best.pt"
+    boot_ep = _read_latest_episode(
+        base / f"{args.bootstrap_tag}.out", base / f"{args.bootstrap_tag}_metrics.csv"
     )
+    MANAGER = TrainingManager(
+        str(base),
+        tag="managed",
+        difficulty=args.difficulty,
+        device=args.device,
+        bootstrap_ckpt=str(boot_ckpt) if boot_ckpt.exists() else None,
+        bootstrap_episode=boot_ep,
+    )
+    PLAY["difficulty"] = args.difficulty
     host = "127.0.0.1"
     url = f"http://{host}:{args.port}"
     print(
-        f"[dashboard] starting on {url}  (ckpt={CFG.ckpt_path.name}, device={CFG.device})",
+        f"[dashboard] starting on {url}  (device={MANAGER.device}, "
+        f"resume@ep={MANAGER.cumulative_episodes})",
         flush=True,
     )
     print("[dashboard] keep this window open; press Ctrl+C to stop.", flush=True)
+    if not args.no_train:
+        MANAGER.start()
     if not args.no_open:
         threading.Thread(
             target=_open_browser_when_ready, args=(host, args.port, url), daemon=True

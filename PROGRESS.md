@@ -41,7 +41,10 @@
 - 실행: `python -m trainer.train --difficulty beginner --train-freq 4 --gate 0.85 --tag beginner ...` (PID는 `server/storage/checkpoints/beginner.pid`).
 - 로그: `server/storage/checkpoints/beginner.out`(stdout) / `beginner.err`(stderr) / `beginner_metrics.csv`(eval 추이). 체크포인트: `beginner_best.pt`.
 - 모니터: `Get-Content beginner.out -Tail 20` 또는 `beginner_metrics.csv` 확인. 첫 eval=ep 5000. 게이트 도달 시 자동 종료.
-- **웹 대시보드**(브라우저 자동): `python -m trainer.dashboard --tag beginner` → http://127.0.0.1:8800. 서버가 모델로 플레이→**WebSocket으로 한 수씩 스트리밍**, 브라우저가 보드/클릭시퀀스/풀이시간/승패 + 승률곡선·loss·ε 렌더(`dashboard.html`, 디자인 토큰·anti-cliché). 터미널 뷰어 `trainer.watch`도 동일 정보 제공. (클라이언트 ONNX 추론 풀 React 대시보드는 M8.)
+- **웹 통합 관리 대시보드**(브라우저 자동): `python -m trainer.dashboard`(또는 `server\dashboard.bat` 더블클릭) → http://127.0.0.1:8800.
+  - **학습이 대시보드 인프로세스로 관리됨**(`trainer/manager.py`): 일시정지/재시작·라이브 하이퍼파라미터(lr/batch/train-freq/ε floor, 재시작 없이)·**누적 세션수 영속화**(모델 생성 시점 기준, 대시보드 재기동에도 카운트 이어짐)·**beginner 체크포인트에서 resume**.
+  - GPU 모니터(VRAM/온도/클럭/util, **읽기전용 — 오버클럭 미지원, 안전**), 병렬 플레이 1~8보드 + 난이도 선택(실시간), 승률 곡선.
+  - 학습=GPU, 플레이=CPU 스냅샷(`play_net`)으로 분리(경쟁 없음). 상태/플레이는 WebSocket, 제어는 `/api/control|config|play`. 터미널 뷰어 `trainer.watch`도 유지. (클라이언트 ONNX 풀 React 대시보드는 M8.)
 - 멈출 때: `Stop-Process -Id <pid>`.
 > 학습 평평하면 런북 4(마스킹은 검증됨). 0.85 미도달·정체 시 하이퍼파라미터(lr·eps decay·width) 튜닝은 후속.
 
@@ -88,3 +91,5 @@
 - **2026-06-04**: M4 트레이너 전부 구현(encoding/model/replay(PER)/dqn(Double DQN·n-step·마스킹)/reward/train/evaluate) + shape 테스트 5. sanity(5×5×3) eval 0.32→0.66 단조상승·loss 안정, 체크포인트 재로드 재현(0.66→0.66) → DoD #2·#3·#4 충족. **Beginner 학습 background 시작(PID `beginner.pid`).** 남은 것: DoD #1(승률 0.85 게이트). pytest 20, ruff 클린.
 - **2026-06-04**: 사용자 요청으로 **라이브 터미널 뷰어 `trainer/watch.py`** 추가(rich). AI 플레이(한 수씩·컬러) + 학습 메트릭/승률 스파크라인 실시간. 백그라운드 학습의 체크포인트·로그·CSV를 읽어 반영. smoke 통과, ruff 클린. (M8 웹 대시보드 전까지의 경량 관찰 도구.)
 - **2026-06-04**: 사용자 요청으로 **웹 대시보드 `trainer/dashboard.py` + `dashboard.html`** 추가(FastAPI+WebSocket+websockets). 서버가 모델로 플레이→WS로 보드/클릭/풀이시간/승패 스트리밍, 브라우저가 렌더 + `/metrics`로 승률곡선·loss·ε. 다크 계측기 UI(디자인 토큰·anti-cliché 준수). E2E 검증(HTML·/metrics·WS frames), ruff·pytest 그린. Beginner 학습은 계속 진행 중(관찰만).
+  - venv 기반 Python을 안정 위치(`C:\Users\MSI\msai-py312`)로 복사·repoint(uv 관리 dir 재링크로 인한 "No Python" 글리치 방지). 브라우저 자동열기를 포트-준비 후로 변경. `server\dashboard.bat` 더블클릭 런처 추가.
+- **2026-06-04**: 사용자 요청으로 대시보드를 **통합 관리 시스템**으로 확장. `trainer/manager.py`(인프로세스 관리형 학습: pause/resume·라이브 hp·resume·영속 누적카운트·GPU 모니터·play_net 스냅샷) + `dashboard.py` 컨트롤플레인(REST 제어 + WS 상태/병렬보드) + `dashboard.html` 관리 UI. nvidia-ml-py(읽기전용 GPU). E2E 검증(상태/GPU/병렬플레이/제어), 관리형 학습 루프 검증(카운트·pause/resume·영속). **오버클럭은 안전상 미지원**(사용자 합의). 다음: 현재 detached 학습 중지 후 관리형으로 전환(resume).
