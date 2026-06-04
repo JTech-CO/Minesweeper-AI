@@ -49,8 +49,10 @@ ruff check . && ruff format --check .
 python -m trainer.train --difficulty beginner --train-freq 4 --gate 0.85 --tag beginner
 
 # ── 웹 대시보드(권장): 브라우저가 자동으로 열림 ──
+# 가장 쉬운 방법: 파일 탐색기에서 server\dashboard.bat 을 더블클릭
+# 또는 터미널에서 (반드시 .venv\Scripts\python.exe 접두사 포함):
+.venv\Scripts\python.exe -m trainer.dashboard --tag beginner   # http://127.0.0.1:8800
 # 좌측: 모델이 보드를 한 수씩 플레이(클릭 시퀀스·풀이 시간·승패), 우측: 승률 곡선·loss·ε
-python -m trainer.dashboard --tag beginner      # http://127.0.0.1:8800
 
 # 터미널 뷰어(브라우저 없이): 동일 정보를 컬러 ASCII로
 python -m trainer.watch --tag beginner
