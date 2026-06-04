@@ -72,6 +72,7 @@
 | 2026-06-04 | **서버 Python = 3.14** 고정(venv). `py -0`가 3.12를 보였으나 디스크에 없음(스테일 등록), 실제 3.14만 설치. fastapi/sqlalchemy/alembic/pydantic(-core)/uvicorn 모두 cp314 휠 정상 설치. **주의: M4 `torch`의 3.14 휠 미제공 가능 → M4 진입 시 재확인** | 환경 실측 | 로컬환경 가이드(추후 갱신) |
 | 2026-06-04 | 비 ASCII 경로(`내 폴더…`)에서 `py` 런처 venv 생성 실패(ANSI 경로 깨짐). **python.exe 직접 호출**(PowerShell `&`=CreateProcessW)로 해결 | Windows+한글경로 이슈 | — |
 | 2026-06-04 | **M4 환경**: uv로 Python **3.12.13** 설치(`uv python install 3.12`; minor-link 경고는 무시 가능, 인터프리터는 정상), `server/.venv` 3.12 재생성. **torch 2.6.0+cu124** 핀(별도 index-url 설치, pyproject 비포함 — 가이드 §2). numpy 2.4.6. pyproject에 `[build-system]`(setuptools) 추가해 `-e .` 가능 | torch 휠/재현성 | `server/pyproject.toml`, 로컬환경 가이드(추후 갱신) |
+| 2026-06-04 | **[환경수정] venv 기반 Python을 안정 위치로 복사**: uv 관리 dir(`AppData\Roaming\uv\python\cpython-3.12.13-...`)이 uv 명령(추가 `uv pip install`) 시 재링크/정리되며 잠깐 사라져 venv `python.exe`가 "No Python at..."로 실패(사용자 dashboard.bat 더블클릭 시 발생). → 기반 인터프리터를 **`C:\Users\MSI\msai-py312`로 복사**하고 `.venv\pyvenv.cfg`의 `home`을 그쪽으로 변경(trampoline이 런타임에 pyvenv.cfg 참조 확인). torch/cuda 정상, 재발 방지. (`.venv`는 비커밋이라 이 변경은 로컬 전용) | uv managed-python 불안정 | `server/.venv/pyvenv.cfg`(로컬) |
 | 2026-06-04 | **문서 위치 불일치 → 해결**: 5개 백서를 레포 루트에서 `docs/`로 이동(`git mv`). `CLAUDE.md`의 `docs/...` 참조가 모두 유효해짐. README 참조도 `docs/`로 갱신 | 사용자 승인 후 이동(파일트리 §1 트리의 `docs/`와 일치) | `CLAUDE.md`·README |
 
 ---
