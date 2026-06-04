@@ -124,7 +124,7 @@ async def config(request: Request) -> JSONResponse:
 async def set_play(request: Request) -> JSONResponse:
     body = await request.json()
     if "parallel" in body:
-        PLAY["parallel"] = max(1, min(8, int(body["parallel"])))
+        PLAY["parallel"] = max(1, min(18, int(body["parallel"])))
     if "difficulty" in body and body["difficulty"] in DIFFICULTIES:
         PLAY["difficulty"] = body["difficulty"]
     return JSONResponse(PLAY)
