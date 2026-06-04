@@ -73,6 +73,23 @@ export function createBoard(spec: BoardSpec): Board {
   };
 }
 
+/** Deep-copy a board (independent typed arrays). */
+export function cloneBoard(board: Board): Board {
+  return {
+    rows: board.rows,
+    cols: board.cols,
+    mines: board.mines,
+    mineLayout: board.mineLayout.slice(),
+    adjacent: board.adjacent.slice(),
+    revealed: board.revealed.slice(),
+    flagged: board.flagged.slice(),
+    status: board.status,
+    minesPlaced: board.minesPlaced,
+    safeRevealed: board.safeRevealed,
+    explodedAt: board.explodedAt,
+  };
+}
+
 /** Recompute adjacency counts for every cell from the current mine layout. */
 export function computeAdjacency(board: Board): void {
   const { rows, cols, mineLayout, adjacent } = board;

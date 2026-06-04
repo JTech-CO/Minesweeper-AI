@@ -32,6 +32,7 @@ export {
   toCoords,
   forEachNeighbor,
   createBoard,
+  cloneBoard,
   computeAdjacency,
   placeMines,
   setMines,
@@ -48,3 +49,20 @@ export { compute3BV, bvPerSecond } from './metrics';
 // Environment
 export { MinesweeperEnv, DEFAULT_REWARD } from './env';
 export type { EnvOptions } from './env';
+
+// Logic solver (M2)
+export {
+  analyze,
+  solveStep,
+  solveBoard,
+  generateNoGuessBoard,
+  toSolverView,
+  computeProbabilities,
+} from './solver/index';
+export type {
+  SolveResult,
+  SolveStep,
+  SolveOutcome,
+  GenerateOptions,
+  SolverView,
+} from './solver/index';

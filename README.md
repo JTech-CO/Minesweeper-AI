@@ -32,7 +32,8 @@ pnpm lint                          # eslint (패키지 경계 룰 포함)
 | Phase | 내용 | 상태 |
 |---|---|---|
 | M1 | `@msai/core` 엔진 (보드·캐스케이드·3BV·env) | ✅ 완료 |
-| M2 | `@msai/core` 논리 솔버 (단일점·패턴·CSP·확률) | 진행 예정 |
-| M3–M10 | 서버·학습·ONNX·web·확장·배포 | 예정 |
+| M2 | `@msai/core` 논리 솔버 (단일점·부분집합·CSP·확률·NG 생성) | ✅ 완료 |
+| M3 | `server` 골격 (FastAPI + DB + 마이그레이션) | 진행 예정 |
+| M4–M10 | 학습·메트릭·커리큘럼·ONNX·web·확장·배포 | 예정 |
 
 자세한 내용은 `PROGRESS.md` 참조.
