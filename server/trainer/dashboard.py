@@ -45,15 +45,19 @@ MAX_PARALLEL = {"beginner": 18, "intermediate": 8, "expert": 4}
 # Subscribers = per-connection emit callables; the online player broadcasts to all of them.
 _SUBSCRIBERS: set = set()
 ONLINE: dict = {"player": None, "thread": None}
+# Persistent Chrome profile so the online browser stays logged in across runs (gitignored).
+ONLINE_PROFILE_DIR = str(Path(__file__).resolve().parent.parent / "storage" / "online_profile")
 
 
-def _run_online_player(player, url: str, server_loop: asyncio.AbstractEventLoop) -> None:
+def _run_online_player(make_coro, server_loop: asyncio.AbstractEventLoop) -> None:
     """Drive Playwright on a dedicated subprocess-capable loop in this worker thread.
 
     uvicorn's reload worker runs on a Windows SelectorEventLoop, which cannot spawn the
     Playwright driver subprocess (NotImplementedError). We give the player its own
     ProactorEventLoop here and marshal every emit back to the server loop (which owns the
     WebSocket queues) via call_soon_threadsafe. Any failure surfaces as online_error.
+
+    make_coro(emit) returns the coroutine to run (player.run or player.login).
     """
 
     def threadsafe_emit(frame: dict) -> None:
@@ -65,10 +69,10 @@ def _run_online_player(player, url: str, server_loop: asyncio.AbstractEventLoop)
         loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
     try:
-        loop.run_until_complete(player.run(url, threadsafe_emit))
+        loop.run_until_complete(make_coro(threadsafe_emit))
     except Exception as e:  # noqa: BLE001 - never let a launch error vanish silently
         threadsafe_emit({"type": "online_error", "msg": f"{type(e).__name__}: {e}"})
-        threadsafe_emit({"type": "online_status", "status": "stopped", "url": url})
+        threadsafe_emit({"type": "online_status", "status": "stopped", "url": ""})
     finally:
         loop.close()
 
@@ -216,23 +220,52 @@ async def online_ctl(request: Request) -> JSONResponse:
     assert MANAGER is not None
     body = await request.json()
     action = body.get("action")
+    from trainer.online import OnlinePlayer
+
+    def _spawn(make_coro) -> None:
+        # Playwright needs a subprocess-capable loop. On Windows the uvicorn reload worker
+        # runs a SelectorEventLoop (can't spawn the driver) — there we hand the player its
+        # own ProactorEventLoop in a worker thread. But we must NOT create a 2nd Proactor
+        # loop alongside a Proactor main loop (it breaks Playwright's pipe → the browser
+        # hands off and exits), so when the main loop already supports subprocesses
+        # (Proactor on Windows, or any loop on Unix) we run the player directly on it.
+        server_loop = asyncio.get_running_loop()
+        if sys.platform == "win32" and not isinstance(server_loop, asyncio.ProactorEventLoop):
+            thread = threading.Thread(
+                target=_run_online_player, args=(make_coro, server_loop), daemon=True
+            )
+            ONLINE["thread"] = thread
+            thread.start()
+        else:
+            task = asyncio.create_task(make_coro(broadcast))
+
+            def _surface(t: asyncio.Task) -> None:  # never let a launch error vanish
+                exc = None if t.cancelled() else t.exception()
+                if exc is not None:
+                    broadcast({"type": "online_error", "msg": f"{type(exc).__name__}: {exc}"})
+                    broadcast({"type": "online_status", "status": "stopped", "url": ""})
+
+            task.add_done_callback(_surface)
+            ONLINE["thread"] = task
+
+    if action == "login":
+        if ONLINE["player"] is not None:
+            ONLINE["player"].request_stop()
+        player = OnlinePlayer(MANAGER.play_act, profile_dir=ONLINE_PROFILE_DIR)
+        ONLINE["player"] = player
+        _spawn(lambda emit: player.login(emit))
+        return JSONResponse({"status": "login"})
     if action == "start":
         url = (body.get("url") or "").strip()
         if not url.startswith("http"):
             return JSONResponse({"error": "provide a full https game URL"}, status_code=400)
         if ONLINE["player"] is not None:
             ONLINE["player"].request_stop()
-        from trainer.online import OnlinePlayer
-
-        player = OnlinePlayer(MANAGER.play_act, delay=float(body.get("delay", 0.5)))
+        delay = max(0.0, min(2.0, float(body.get("delay", 0.3))))
+        player = OnlinePlayer(MANAGER.play_act, delay=delay, profile_dir=ONLINE_PROFILE_DIR)
         ONLINE["player"] = player
-        server_loop = asyncio.get_running_loop()
-        thread = threading.Thread(
-            target=_run_online_player, args=(player, url, server_loop), daemon=True
-        )
-        ONLINE["thread"] = thread
-        thread.start()
-        return JSONResponse({"status": "starting", "url": url})
+        _spawn(lambda emit: player.run(url, emit))
+        return JSONResponse({"status": "starting", "url": url, "delay": delay})
     if action == "stop" and ONLINE["player"] is not None:
         ONLINE["player"].request_stop()
         return JSONResponse({"status": "stopping"})

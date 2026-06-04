@@ -58,6 +58,8 @@
   .gauge.hot > span { background:var(--bad); }
   canvas { width:100%; height:170px; display:block; }
   .hint { font-size:10px; color:var(--dim); margin-top:5px; line-height:1.4; }
+  .online-stats { display:flex; flex-wrap:wrap; gap:12px; font-size:11px; color:var(--dim); margin:7px 0 2px; }
+  .online-stats b { color:var(--tx); font-weight:700; }
   /* fixed-size boards that wrap; bigger difficulties = physically bigger boards */
   .boards { display:flex; flex-wrap:wrap; gap:6px; align-items:flex-start; }
   .board-panel { border:1px solid var(--bd); background:var(--panel); width:fit-content; }
@@ -142,11 +144,21 @@
 
   <section class="panel"><h2>live · minesweeper.online (real site)</h2><div class="b">
     <div class="row">
-      <input type="text" id="online_url" placeholder="https://minesweeper.online/game/..." style="flex:1; min-width:220px" />
+      <input type="text" id="online_url" placeholder="https://minesweeper.online/start/1" style="flex:1; min-width:180px" />
+      <label class="dim" style="font-size:10px; white-space:nowrap">delay
+        <input type="number" id="online_delay" value="0.3" min="0" max="2" step="0.05" style="width:50px" />s</label>
+      <button id="online_login">login</button>
       <button id="online_start">play</button>
       <button id="online_stop">stop</button>
     </div>
-    <div class="hint" id="online_status">실제 사이트는 보이는 브라우저 창에서 플레이됩니다. 진행 중인 게임 URL을 붙여넣고 play. (개인 시연·레이트제한·약관 준수)</div>
+    <div class="online-stats mono">
+      <span>games <b id="os_games">0</b></span>
+      <span>W <b id="os_w">0</b> / L <b id="os_l">0</b></span>
+      <span>last <b id="os_last">–</b></span>
+      <span>CPS <b id="os_cps">–</b></span>
+      <span>best <b id="os_best">–</b></span>
+    </div>
+    <div class="hint" id="online_status">login으로 계정에 한 번 로그인하면 이후 플레이가 기록됩니다. start/1·2·3(초/중/고급) 또는 진행 중 게임 URL을 넣고 play. 측정 시간은 레이트제한(delay) 영향을 받습니다 · 자동 플레이는 약관·계정 위험, 순위 제출 금지.</div>
     <div id="online_board_wrap" style="margin-top:8px"></div>
   </div></section>
   </div>
@@ -278,11 +290,18 @@ function connect(){
     else if (m.type === "online_start") buildOnlineGrid(m.rows, m.cols);
     else if (m.type === "online_board") {
       renderOnline(m.cells);
-      $("online_status").textContent = `${m.rows}×${m.cols} · ${m.move}수 · ${m.status}` + (m.mines!=null?` · mines ${m.mines}`:"");
-    } else if (m.type === "online_result") {
-      $("online_status").innerHTML = m.won
-        ? `<span style="color:var(--ok)">WON</span> in ${m.moves} moves`
-        : `<span style="color:var(--bad)">LOST</span> in ${m.moves} moves`;
+      const g = m.game ? `game ${m.game} · ` : "";
+      const secs = m.elapsedMs!=null ? `${(m.elapsedMs/1000).toFixed(1)}s` : "";
+      const cps = m.cps!=null ? ` · ${m.cps} cps` : "";
+      $("online_status").textContent = `${g}${m.rows}×${m.cols} · ${m.move} clicks · ${secs}${cps} · ${m.status}`;
+    } else if (m.type === "online_stats") {
+      $("os_games").textContent = m.games;
+      $("os_w").textContent = m.wins; $("os_l").textContent = m.losses;
+      $("os_last").innerHTML = `<span style="color:var(${m.lastWon?'--ok':'--bad'})">${m.lastWon?'W':'L'}</span> ${(m.lastMs/1000).toFixed(2)}s/${m.lastMoves}`;
+      $("os_cps").textContent = m.lastCps;
+      $("os_best").textContent = m.bestMs!=null ? `${(m.bestMs/1000).toFixed(2)}s` : "–";
+    } else if (m.type === "online_login_wait") {
+      $("online_status").innerHTML = `<span style="color:var(--acc)">로그인 창이 열렸습니다 — 로그인 후 stop을 누르세요.</span>`;
     } else if (m.type === "online_error") {
       $("online_status").innerHTML = `<span style="color:var(--bad)">${m.msg}</span>`;
     } else if (m.type === "online_status") {
@@ -353,11 +372,16 @@ $("btn_apply").onclick = () => post("/api/config", {
   train_freq:parseInt($("train_freq").value), eps_end:parseFloat($("eps_end").value)});
 $("parallel").onchange = () => post("/api/play", {parallel:parseInt($("parallel").value)});
 $("difficulty").onchange = () => post("/api/play", {difficulty:$("difficulty").value});
+$("online_login").onclick = () => {
+  $("online_status").textContent = "로그인 창을 여는 중…";
+  post("/api/online", {action:"login"});
+};
 $("online_start").onclick = () => {
   const u = $("online_url").value.trim();
-  if (!u){ $("online_status").textContent = "진행 중인 게임 URL을 입력하세요."; return; }
+  if (!u){ $("online_status").textContent = "진행 중인 게임 URL을 입력하세요 (예: https://minesweeper.online/start/1)."; return; }
+  const delay = parseFloat($("online_delay").value) || 0.3;
   $("online_status").textContent = "starting browser…";
-  post("/api/online", {action:"start", url:u});
+  post("/api/online", {action:"start", url:u, delay});
 };
 $("online_stop").onclick = () => post("/api/online", {action:"stop"});
 
