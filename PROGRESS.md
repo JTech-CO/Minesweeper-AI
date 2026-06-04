@@ -5,8 +5,9 @@
 ---
 
 ## 현재 상태
-- **현재 Phase**: M3 **완료** → 다음 M4 (trainer ★, 학습 핵심)
-- **마지막 갱신**: 2026-06-04
+- **현재 Phase**: M4 진행 중. **모델 단독 학습은 정체(beginner best 0.205, ~무작위 추론 수준)** — 통제 진단으로 근본원인 확정(아래). 사용자 결정 **C**로 **B(솔버-하이브리드, 부분 M7)를 먼저 적용해 시연 승률 확보** → **다음은 A(M4 RL 보상/탐험 교정 재학습)**.
+- **플레이 승률(솔버 하이브리드, 측정)**: beginner **0.948** / intermediate **0.820** / expert **0.370**(표준 강제-추측 상한; 일관 100%는 NG 모드). 모델 단독은 beginner 0.193.
+- **마지막 갱신**: 2026-06-05
 - **환경 점검**: Node 25 / pnpm 11.1.3 / git 2.54. 서버 venv=**Python 3.12.13**(uv 관리, `server/.venv`). GPU=**RTX 4060 Laptop, driver 556.12, 8GB**. DB = dev SQLite로 `alembic upgrade head` 성공. **torch.cuda.is_available() = [x] True**(torch 2.6.0+cu124, GPU matmul 동작). numpy 2.4.6. → **M4 진입조건 충족.**
 
 ---
@@ -77,6 +78,8 @@
 | 2026-06-04 | **M4 환경**: uv로 Python **3.12.13** 설치(`uv python install 3.12`; minor-link 경고는 무시 가능, 인터프리터는 정상), `server/.venv` 3.12 재생성. **torch 2.6.0+cu124** 핀(별도 index-url 설치, pyproject 비포함 — 가이드 §2). numpy 2.4.6. pyproject에 `[build-system]`(setuptools) 추가해 `-e .` 가능 | torch 휠/재현성 | `server/pyproject.toml`, 로컬환경 가이드(추후 갱신) |
 | 2026-06-04 | **[환경수정] venv 기반 Python을 안정 위치로 복사**: uv 관리 dir(`AppData\Roaming\uv\python\cpython-3.12.13-...`)이 uv 명령(추가 `uv pip install`) 시 재링크/정리되며 잠깐 사라져 venv `python.exe`가 "No Python at..."로 실패(사용자 dashboard.bat 더블클릭 시 발생). → 기반 인터프리터를 **`C:\Users\MSI\msai-py312`로 복사**하고 `.venv\pyvenv.cfg`의 `home`을 그쪽으로 변경(trampoline이 런타임에 pyvenv.cfg 참조 확인). torch/cuda 정상, 재발 방지. (`.venv`는 비커밋이라 이 변경은 로컬 전용) | uv managed-python 불안정 | `server/.venv/pyvenv.cfg`(로컬) |
 | 2026-06-04 | **문서 위치 불일치 → 해결**: 5개 백서를 레포 루트에서 `docs/`로 이동(`git mv`). `CLAUDE.md`의 `docs/...` 참조가 모두 유효해짐. README 참조도 `docs/`로 갱신 | 사용자 승인 후 이동(파일트리 §1 트리의 `docs/`와 일치) | `CLAUDE.md`·README |
+| 2026-06-05 | **[승인] 결정 C: B(솔버-하이브리드) 먼저, A(M4 RL 교정) 나중**. M4 게이트(0.85) 미달·정체 진단 후, 시연 승률을 위해 **부분 M7을 M5·M6보다 먼저** 적용(phase 순서 일부 앞당김 — 사용자 승인). | 모델 단독은 deduction 미학습(0.19)·표준 상한 존재. 솔버는 즉시 0.95/0.82. 일관 시연=NG/하이브리드(설계) | 하네스 phase 순서 |
+| 2026-06-05 | **새 컴포넌트: `server/trainer/solver.py`**(파일트리에 없던 Python 솔버). TS `@msai/core/solver`(M2)의 **충실 이식**. 정식 M7의 하이브리드/ONNX는 여전히 **TS(agent/)가 정본**; 이 Python 솔버는 **Python 플레이 경로(대시보드·온라인) 전용**. **거짓양성 0 불변식**은 `tests/test_solver.py`로 독립 검증(§5). | 사용자 demo가 Python 경로라 즉효. 솔버는 패리티 강제 이중구현 대상 아님(env·인코딩만) | 파일트리(솔버에 Python 추가), M7 |
 
 ---
 
@@ -95,4 +98,5 @@
 - **2026-06-04**: 대시보드: 병렬 보드 1~18, 난이도 옵션 하드코딩(항상 선택), 옛 프로세스/`--tag` 별칭 등 launch 견고화.
 - **2026-06-04**: 대시보드 **자동 리로드**(uvicorn --reload; MANAGER를 lifespan에서 env 기반 생성→worker 재시작 시 체크포인트 resume) + **CLI 스타일 최소 UI 재설계**(모노스페이스·얇은 보더·그림자/그라데이션/트랜지션 제거로 저RAM·고밀도, 보드 숫자/지뢰 색 유지, lifetime 위치 유지) + 보드 패널 fit(유동 1fr) + 병렬 18. JS/ID 훅 보존.
 - **2026-06-04**: 사용자 요청으로 **실제 사이트 플레이(minesweeper.online)** 추가 — `trainer/online.py`(Playwright 서버측, 모델이 DOM 보드 읽고 클릭, 대시보드에 스트리밍) + `/api/online` + UI URL/Play/Stop. **개인 시연·레이트제한·약관 준수**(공개 순위 자동제출 금지). DOM 계약(`cell_X_Y`/`hd_*`)은 한 곳에 격리(런북 10). **검증 한계**: headless 샌드박스에서 minesweeper.online이 보드를 렌더 안 함(세션/동의/봇차단 가능성) → **가시 브라우저(headless=False) 기본** + 사용자 실제 게임 URL로 검증 필요(셀렉터 보정은 `online.py` 1곳). parse_board 단위·엔드포인트 검증·ruff/pytest 그린.
+- **2026-06-05**: 대시보드 마무리(난이도별 고정칸 보드+펄스), **온라인 플레이 안정화**(uvicorn reload 워커 SelectorEventLoop→Playwright 서브프로세스 NotImplementedError를 전용 Proactor 스레드/메인루프 적응 실행으로 해결; 보드 렌더 대기+0-인덱스 좌표 수정; CPS·시도·ms·승패 자체측정 + 연속 플레이; **Google OAuth 차단 우회 위해 실제 Chrome CDP 연결** 로그인). **승률 정체 진단**: managed_state 730k·best 0.205, eval 완전 평탄 → M4 게이트 실패(Expert 상한과 무관). 통제 진단(체크포인트 로드): 확정-안전 추종 58%·확정-지뢰 클릭 3.4%·무작위 대비 미미 → **모델이 deduction 미학습**(조밀보상 Q포화 + eps바닥 재개 가설). 사용자 결정 **C** → **B 구현**: `trainer/solver.py`(TS 솔버 M2 충실 이식, **거짓양성 0** 게이트 580보드 통과, 논리클리어 88/65/12%) + `manager.hybrid_act`(확정안전→최저확률 추측→모델 폴백) + 대시보드/온라인 플레이 연결. 측정 승률 beginner 0.948·inter 0.820·expert 0.370. pytest 24 그린. **다음: A(M4 RL 재학습 교정).**
 - **2026-06-04**: 사용자 요청으로 대시보드를 **통합 관리 시스템**으로 확장. `trainer/manager.py`(인프로세스 관리형 학습: pause/resume·라이브 hp·resume·영속 누적카운트·GPU 모니터·play_net 스냅샷) + `dashboard.py` 컨트롤플레인(REST 제어 + WS 상태/병렬보드) + `dashboard.html` 관리 UI. nvidia-ml-py(읽기전용 GPU). E2E 검증(상태/GPU/병렬플레이/제어), 관리형 학습 루프 검증(카운트·pause/resume·영속). **오버클럭은 안전상 미지원**(사용자 합의). 다음: 현재 detached 학습 중지 후 관리형으로 전환(resume).
