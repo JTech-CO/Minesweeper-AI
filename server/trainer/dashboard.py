@@ -16,12 +16,14 @@ from __future__ import annotations
 import argparse
 import asyncio
 import csv
+import os
 import random
 import re
 import socket
 import threading
 import time
 import webbrowser
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
@@ -40,7 +42,36 @@ PLAY: dict = {"parallel": 2, "difficulty": "beginner", "delay": 0.22}
 # Subscribers = per-connection emit callables; the online player broadcasts to all of them.
 _SUBSCRIBERS: set = set()
 ONLINE: dict = {"player": None, "task": None}
-app = FastAPI(title="Minesweeper AI — Management")
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Create the training manager on (re)start, reading config from env vars so the app
+    can be served via an import string for uvicorn --reload (resumes from checkpoint)."""
+    global MANAGER
+    base = Path(os.environ.get("MSAI_DIR", "storage/checkpoints"))
+    tag = os.environ.get("MSAI_BOOTSTRAP_TAG", "beginner")
+    diff = os.environ.get("MSAI_DIFFICULTY", "beginner")
+    device = os.environ.get("MSAI_DEVICE", "cuda")
+    boot_ckpt = base / f"{tag}_best.pt"
+    boot_ep = _read_latest_episode(base / f"{tag}.out", base / f"{tag}_metrics.csv")
+    MANAGER = TrainingManager(
+        str(base), tag="managed", difficulty=diff, device=device,
+        bootstrap_ckpt=str(boot_ckpt) if boot_ckpt.exists() else None, bootstrap_episode=boot_ep,
+    )
+    PLAY["difficulty"] = diff
+    if os.environ.get("MSAI_NO_TRAIN") != "1":
+        MANAGER.start()
+    print(
+        f"[dashboard] manager ready: ep={MANAGER.cumulative_episodes} dev={MANAGER.device}",
+        flush=True,
+    )
+    yield
+    if MANAGER is not None:
+        MANAGER.stop()
+
+
+app = FastAPI(title="Minesweeper AI — Management", lifespan=lifespan)
 
 
 def broadcast(frame: dict) -> None:
@@ -300,41 +331,35 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--device", default="cuda")
     p.add_argument("--no-open", action="store_true")
     p.add_argument("--no-train", action="store_true", help="serve without starting training")
+    p.add_argument("--no-reload", action="store_true", help="disable auto-reload on code changes")
     return p.parse_args()
 
 
 def main() -> None:
-    global MANAGER
     args = parse_args()
-    base = Path(args.dir)
-    boot_ckpt = base / f"{args.bootstrap_tag}_best.pt"
-    boot_ep = _read_latest_episode(
-        base / f"{args.bootstrap_tag}.out", base / f"{args.bootstrap_tag}_metrics.csv"
-    )
-    MANAGER = TrainingManager(
-        str(base),
-        tag="managed",
-        difficulty=args.difficulty,
-        device=args.device,
-        bootstrap_ckpt=str(boot_ckpt) if boot_ckpt.exists() else None,
-        bootstrap_episode=boot_ep,
-    )
-    PLAY["difficulty"] = args.difficulty
+    # Config is passed to the worker (which may be a reload subprocess) via the environment.
+    os.environ["MSAI_DIR"] = args.dir
+    os.environ["MSAI_BOOTSTRAP_TAG"] = args.bootstrap_tag
+    os.environ["MSAI_DIFFICULTY"] = args.difficulty
+    os.environ["MSAI_DEVICE"] = args.device
+    if args.no_train:
+        os.environ["MSAI_NO_TRAIN"] = "1"
     host = "127.0.0.1"
     url = f"http://{host}:{args.port}"
-    print(
-        f"[dashboard] starting on {url}  (device={MANAGER.device}, "
-        f"resume@ep={MANAGER.cumulative_episodes})",
-        flush=True,
-    )
+    reload_on = "off" if args.no_reload else "on"
+    print(f"[dashboard] starting on {url}  (reload={reload_on})", flush=True)
     print("[dashboard] keep this window open; press Ctrl+C to stop.", flush=True)
-    if not args.no_train:
-        MANAGER.start()
     if not args.no_open:
         threading.Thread(
             target=_open_browser_when_ready, args=(host, args.port, url), daemon=True
         ).start()
-    uvicorn.run(app, host=host, port=args.port, log_level="warning")
+    if args.no_reload:
+        uvicorn.run(app, host=host, port=args.port, log_level="warning")
+    else:
+        uvicorn.run(
+            "trainer.dashboard:app", host=host, port=args.port, log_level="warning",
+            reload=True, reload_dirs=[str(Path(__file__).parent)],
+        )
 
 
 if __name__ == "__main__":
