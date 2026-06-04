@@ -7,8 +7,7 @@
 ## 현재 상태
 - **현재 Phase**: M3 **완료** → 다음 M4 (trainer ★, 학습 핵심)
 - **마지막 갱신**: 2026-06-04
-- **환경 점검**: Node 25 / pnpm 11.1.3 / git 2.54. 서버 venv=**Python 3.14**(`server/.venv`). GPU=**RTX 4060 Laptop, driver 556.12, 8GB**(CUDA 12.x 호환) 확인됨. DB 기동 = **dev SQLite로 `alembic upgrade head` 성공**(Docker/PG 미설치, 사용자 승인). torch.cuda = [ ] (M4에서 검증).
-- **⚠ M4 진입 전 블로커 가능성**: PyTorch는 Python **3.11/3.12** 휠 권장(가이드 §1; 3.13+ 지원 늦음) → 현재 3.14에는 torch 휠이 없을 공산. **Python 3.12 설치 후 venv 재생성** 필요할 수 있음(아래 미결 참조).
+- **환경 점검**: Node 25 / pnpm 11.1.3 / git 2.54. 서버 venv=**Python 3.12.13**(uv 관리, `server/.venv`). GPU=**RTX 4060 Laptop, driver 556.12, 8GB**. DB = dev SQLite로 `alembic upgrade head` 성공. **torch.cuda.is_available() = [x] True**(torch 2.6.0+cu124, GPU matmul 동작). numpy 2.4.6. → **M4 진입조건 충족.**
 
 ---
 
@@ -45,11 +44,7 @@
 > 멈춤 규칙(하네스 §3)으로 멈췄을 때 여기에 적는다: 증상 / 재현 방법 / 시도한 것 / 가설 / 필요한 결정.
 
 - **[해결됨] M3 DB 환경** (2026-06-04): 사용자가 **개발용 SQLite 승인**. 포터블 타입으로 작성해 Postgres 호환 유지, `alembic upgrade head` 성공. docker-compose+PG는 CI/운영용으로 작성. (결정 로그 참조)
-- **[M4 진입 블로커 — 확정] PyTorch ↔ Python 버전** (2026-06-04)
-  - **확인됨**: `pip install torch --index-url .../cu124 --dry-run`이 Python 3.14에서 **"No matching distribution"**(cp314 휠 없음). GPU(RTX 4060, driver 556.12)는 존재·CUDA 12.x 호환 → GPU는 문제 아님.
-  - **조치(필수)**: **Python 3.12 설치** → `server/.venv`를 3.12로 재생성 → `pip install -e ".[dev]"` 재설치 → `pip install torch --index-url https://download.pytorch.org/whl/cu124` → `torch.cuda.is_available()` True 확인(가이드 §3).
-  - **필요한 결정**: Python 3.12 설치를 ① 사용자가 직접(python.org) / ② Claude가 `winget install Python.Python.3.12` 또는 `uv python install 3.12`로(시스템 변경 동의 필요). 결정 전까지 M4 미착수.
-  - 서버(M3) 코드는 3.12에서도 동일 동작(의존성 모두 3.12 휠 존재).
+- **[해결됨] M4 PyTorch ↔ Python 버전** (2026-06-04): 사용자 승인하에 uv로 Python **3.12.13** 설치 → `server/.venv` 재생성 → 의존성+**torch 2.6.0+cu124** 설치 → `torch.cuda.is_available()` **True**(RTX 4060). M3 코드도 3.12에서 회귀 그린(pytest 3, alembic check). (현재 미결 블로커 없음.)
 
 ---
 
@@ -69,6 +64,7 @@
 | 2026-06-04 | **[승인] M3 개발 DB = SQLite**(Docker/Postgres 미설치). 포터블 타입(`Uuid`/`JSON`/`Enum(native_enum=False)`)으로 작성해 Postgres 호환 유지. `docker-compose.yml`+Postgres 설정은 CI/운영용으로 함께 작성. `DATABASE_URL`로 dev=sqlite/prod=postgres 전환 | 사용자 승인(블로커 결정) | 기술백서 §3.1(운영은 PG 유지), `.env.example` |
 | 2026-06-04 | **서버 Python = 3.14** 고정(venv). `py -0`가 3.12를 보였으나 디스크에 없음(스테일 등록), 실제 3.14만 설치. fastapi/sqlalchemy/alembic/pydantic(-core)/uvicorn 모두 cp314 휠 정상 설치. **주의: M4 `torch`의 3.14 휠 미제공 가능 → M4 진입 시 재확인** | 환경 실측 | 로컬환경 가이드(추후 갱신) |
 | 2026-06-04 | 비 ASCII 경로(`내 폴더…`)에서 `py` 런처 venv 생성 실패(ANSI 경로 깨짐). **python.exe 직접 호출**(PowerShell `&`=CreateProcessW)로 해결 | Windows+한글경로 이슈 | — |
+| 2026-06-04 | **M4 환경**: uv로 Python **3.12.13** 설치(`uv python install 3.12`; minor-link 경고는 무시 가능, 인터프리터는 정상), `server/.venv` 3.12 재생성. **torch 2.6.0+cu124** 핀(별도 index-url 설치, pyproject 비포함 — 가이드 §2). numpy 2.4.6. pyproject에 `[build-system]`(setuptools) 추가해 `-e .` 가능 | torch 휠/재현성 | `server/pyproject.toml`, 로컬환경 가이드(추후 갱신) |
 | 2026-06-04 | **문서 위치 불일치 → 해결**: 5개 백서를 레포 루트에서 `docs/`로 이동(`git mv`). `CLAUDE.md`의 `docs/...` 참조가 모두 유효해짐. README 참조도 `docs/`로 갱신 | 사용자 승인 후 이동(파일트리 §1 트리의 `docs/`와 일치) | `CLAUDE.md`·README |
 
 ---

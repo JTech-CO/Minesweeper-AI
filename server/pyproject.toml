@@ -10,12 +10,25 @@ dependencies = [
   "alembic>=1.13",
   "pydantic>=2.7",
   "pydantic-settings>=2.3",
+  "numpy>=1.26",
 ]
+# NOTE: torch is intentionally NOT listed here. Install the CUDA build separately so
+# pip/uv doesn't pull a CPU wheel from PyPI (로컬환경 가이드 §2):
+#   uv pip install torch --index-url https://download.pytorch.org/whl/cu124
 
 [project.optional-dependencies]
 # Postgres driver for CI/production (dev uses the stdlib sqlite3 driver).
 postgres = ["psycopg[binary]>=3.2"]
 dev = ["pytest>=8", "httpx>=0.27", "ruff>=0.6"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+# `trainer*` matches nothing until M4 lands; that is fine for setuptools find.
+include = ["app*", "trainer*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
