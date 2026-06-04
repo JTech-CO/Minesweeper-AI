@@ -3,174 +3,163 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Minesweeper AI — Management</title>
+<title>minesweeper-ai // management</title>
 <style>
+  /* CLI / terminal style: monospace, minimal colour, thin borders, no shadows/gradients/
+     transitions (low paint/RAM). Board keeps classic number/mine colours for readability. */
   :root {
-    --bg:#0e1116; --surface:#161b22; --surface2:#1b222c; --border:#2a313c;
-    --text:#e6edf3; --muted:#8b949e; --accent:#4c8dff; --safe:#2ea043; --danger:#d2453f; --guess:#d2a23f;
-    --n1:#4c8dff; --n2:#2ea043; --n3:#d2453f; --n4:#a371f7;
-    --n5:#d2a23f; --n6:#3fb0d2; --n7:#c9d1d9; --n8:#8b949e;
+    --bg:#0a0d10; --panel:#0e1217; --bd:#1e2630; --tx:#c4ccd4; --dim:#697078;
+    --ok:#43b04a; --warn:#caa23a; --bad:#d24b43; --acc:#4f8cc9;
+    --n1:#4f8cc9; --n2:#43b04a; --n3:#d24b43; --n4:#9a6ee0;
+    --n5:#caa23a; --n6:#3bb0bf; --n7:#aeb6bf; --n8:#6b7480;
   }
   * { box-sizing:border-box; }
-  body { margin:0; background:var(--bg); color:var(--text);
-    font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; font-size:14px; }
-  .mono { font-family:ui-monospace,"JetBrains Mono",Consolas,monospace; }
-  header { display:flex; align-items:center; gap:16px; padding:12px 18px;
-    border-bottom:1px solid var(--border); background:var(--surface); flex-wrap:wrap; }
-  header h1 { font-size:15px; font-weight:600; margin:0; }
-  .dot { width:9px; height:9px; border-radius:50%; background:var(--danger); display:inline-block; }
-  .dot.on { background:var(--safe); }
-  .badge { padding:3px 10px; border-radius:5px; font-size:12px; font-weight:600; border:1px solid var(--border); }
-  .badge.running { color:var(--safe); border-color:var(--safe); }
-  .badge.paused { color:var(--guess); border-color:var(--guess); }
-  .badge.stopped, .badge.idle { color:var(--muted); }
-  .badge.playing { color:var(--accent); border-color:var(--accent); }
-  .badge.won { color:var(--safe); border-color:var(--safe); }
-  .badge.lost { color:var(--danger); border-color:var(--danger); }
+  body { margin:0; background:var(--bg); color:var(--tx);
+    font:12px/1.4 ui-monospace,"JetBrains Mono","Cascadia Code",Consolas,monospace; }
+  header { display:flex; align-items:baseline; gap:10px; padding:5px 10px; border-bottom:1px solid var(--bd); }
+  header h1 { font-size:12px; font-weight:600; margin:0; letter-spacing:.5px; }
+  header h1 .dim { color:var(--dim); font-weight:400; }
+  .dot { width:7px; height:7px; background:var(--bad); display:inline-block; }
+  .dot.on { background:var(--ok); }
+  .badge { padding:0 6px; border:1px solid var(--bd); font-size:11px; }
+  .badge.running { color:var(--ok); border-color:var(--ok); }
+  .badge.paused { color:var(--warn); border-color:var(--warn); }
+  .badge.stopped, .badge.idle { color:var(--dim); }
+  .badge.playing { color:var(--acc); border-color:var(--acc); }
+  .badge.won { color:var(--ok); border-color:var(--ok); }
+  .badge.lost { color:var(--bad); border-color:var(--bad); }
   .count { margin-left:auto; text-align:right; }
-  .count .k { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; }
-  .count .v { font-size:24px; font-weight:700; }
-  main { display:grid; grid-template-columns:340px 1fr; gap:16px; padding:16px; align-items:start; }
-  .panel { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:14px; margin-bottom:16px; }
-  .panel h2 { font-size:12px; font-weight:600; color:var(--muted); text-transform:uppercase;
-    letter-spacing:.6px; margin:0 0 12px; }
-  button { font:inherit; color:var(--text); background:var(--surface2); border:1px solid var(--border);
-    border-radius:6px; padding:7px 12px; cursor:pointer; }
-  button:hover { border-color:var(--accent); }
-  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600; }
-  button.warn { color:var(--guess); border-color:var(--guess); }
-  .row { display:flex; gap:8px; align-items:center; margin-bottom:10px; flex-wrap:wrap; }
-  label.fld { display:flex; flex-direction:column; gap:3px; font-size:12px; color:var(--muted); }
-  input[type=number], select { font:inherit; color:var(--text); background:var(--bg);
-    border:1px solid var(--border); border-radius:6px; padding:6px 8px; width:96px; }
-  select { width:auto; }
+  .count .k { font-size:9px; color:var(--dim); letter-spacing:1px; text-transform:uppercase; }
+  .count .v { font-size:16px; font-weight:700; color:var(--ok); }
+  main { padding:8px; display:flex; flex-direction:column; gap:8px; }
+  .cols { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:8px; align-items:start; }
+  .panel { border:1px solid var(--bd); background:var(--panel); }
+  .panel > h2 { margin:0; padding:2px 8px; font-size:10px; font-weight:600; color:var(--dim);
+    text-transform:uppercase; letter-spacing:1.2px; border-bottom:1px solid var(--bd); }
+  .panel > .b { padding:6px 8px; }
   table.kv { width:100%; border-collapse:collapse; }
-  table.kv td { padding:3px 0; font-size:13px; }
-  table.kv td.k { color:var(--muted); }
-  table.kv td.v { text-align:right; font-family:ui-monospace,Consolas,monospace; }
-  .gauge { height:8px; background:var(--surface2); border-radius:4px; overflow:hidden; margin-top:4px; }
-  .gauge > span { display:block; height:100%; background:var(--accent); }
-  .gauge.warm > span { background:var(--guess); }
-  .gauge.hot > span { background:var(--danger); }
-  canvas { width:100%; height:140px; display:block; }
-  .boards { display:grid; grid-template-columns:repeat(auto-fill, minmax(180px, 1fr)); gap:12px; }
-  .board-panel { background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:10px; }
-  .board-head { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;
-    font-size:12px; color:var(--muted); }
-  .grid { display:grid; gap:1px; width:100%; }
-  .cell { display:flex; align-items:center; justify-content:center; border-radius:2px; font-weight:700;
-    font-family:ui-monospace,Consolas,monospace; background:var(--surface2);
-    aspect-ratio:1; overflow:hidden; line-height:1; min-width:0; }
-  .cell.hidden { background:#222a35; }
-  .cell.open { background:#10151c; color:var(--muted); }
+  table.kv td { padding:1.5px 0; }
+  table.kv td.k { color:var(--dim); }
+  table.kv td.v { text-align:right; }
+  .row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  .row + .row { margin-top:6px; }
+  label.fld { display:flex; flex-direction:column; gap:2px; font-size:10px; color:var(--dim);
+    text-transform:uppercase; letter-spacing:.5px; }
+  input, select, button { font:inherit; color:var(--tx); background:var(--bg); border:1px solid var(--bd); padding:2px 5px; }
+  input[type=number] { width:74px; }
+  button { cursor:pointer; background:#11161c; }
+  button:hover { border-color:var(--acc); color:var(--acc); }
+  .gauge { height:5px; background:#11161c; border:1px solid var(--bd); margin-top:3px; }
+  .gauge > span { display:block; height:100%; background:var(--acc); }
+  .gauge.warm > span { background:var(--warn); }
+  .gauge.hot > span { background:var(--bad); }
+  canvas { width:100%; height:170px; display:block; }
+  .hint { font-size:10px; color:var(--dim); margin-top:5px; line-height:1.4; }
+  .boards { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr)); gap:6px; }
+  .board-panel { border:1px solid var(--bd); background:var(--panel); }
+  .board-head { display:flex; justify-content:space-between; padding:2px 5px; font-size:10px;
+    color:var(--dim); border-bottom:1px solid var(--bd); }
+  .grid { display:grid; gap:1px; width:100%; padding:3px; }
+  .cell { display:flex; align-items:center; justify-content:center; aspect-ratio:1; overflow:hidden;
+    line-height:1; min-width:0; font-weight:700; background:#11161c; }
+  .cell.hidden { background:#1b222b; }
+  .cell.open { background:#0a0e12; color:var(--dim); }
   .cell.n1 { color:var(--n1); } .cell.n2 { color:var(--n2); } .cell.n3 { color:var(--n3); }
   .cell.n4 { color:var(--n4); } .cell.n5 { color:var(--n5); } .cell.n6 { color:var(--n6); }
   .cell.n7 { color:var(--n7); } .cell.n8 { color:var(--n8); }
-  .cell.mine { background:#3a2026; color:var(--danger); }
-  .cell.exploded { background:var(--danger); color:#fff; }
-  .cell.last { outline:1px solid var(--accent); outline-offset:-1px; }
-  .hint { font-size:11px; color:var(--muted); margin-top:6px; line-height:1.5; }
+  .cell.mine { background:#3a2026; color:var(--bad); }
+  .cell.exploded { background:var(--bad); color:#fff; }
+  .cell.last { outline:1px solid var(--acc); outline-offset:-1px; }
 </style>
 </head>
 <body>
 <header>
   <span class="dot" id="dot"></span>
-  <h1>Minesweeper AI — Management</h1>
+  <h1>minesweeper-ai <span class="dim">// management</span></h1>
   <span class="badge idle" id="train_status">—</span>
   <span class="count">
     <span class="k">lifetime sessions trained</span><br />
-    <span class="v mono" id="count">—</span>
+    <span class="v" id="count">—</span>
   </span>
 </header>
 <main>
-  <div>
-    <section class="panel">
-      <h2>Training control</h2>
+  <div class="cols">
+    <section class="panel"><h2>training control</h2><div class="b">
       <div class="row">
-        <button class="primary" id="btn_pause">Pause</button>
-        <button class="warn" id="btn_stop">Stop</button>
-        <button id="btn_start">Start</button>
+        <button id="btn_pause">pause</button>
+        <button id="btn_stop">stop</button>
+        <button id="btn_start">start</button>
       </div>
-      <table class="kv">
+      <table class="kv" style="margin-top:6px">
         <tr><td class="k">status</td><td class="v" id="m_status">—</td></tr>
-        <tr><td class="k">this run (sessions)</td><td class="v" id="m_since">—</td></tr>
-        <tr><td class="k">eval win-rate</td><td class="v" id="m_eval" style="color:var(--safe)">—</td></tr>
-        <tr><td class="k">train win-rate</td><td class="v" id="m_train">—</td></tr>
+        <tr><td class="k">this run</td><td class="v" id="m_since">—</td></tr>
+        <tr><td class="k">eval win%</td><td class="v" id="m_eval" style="color:var(--ok)">—</td></tr>
+        <tr><td class="k">train win%</td><td class="v" id="m_train">—</td></tr>
         <tr><td class="k">loss</td><td class="v" id="m_loss">—</td></tr>
         <tr><td class="k">epsilon</td><td class="v" id="m_eps">—</td></tr>
-        <tr><td class="k">steps / sec</td><td class="v" id="m_sps">—</td></tr>
+        <tr><td class="k">steps/s</td><td class="v" id="m_sps">—</td></tr>
       </table>
-    </section>
+    </div></section>
 
-    <section class="panel">
-      <h2>Live hyperparameters</h2>
+    <section class="panel"><h2>live hyperparameters</h2><div class="b">
       <div class="row">
-        <label class="fld">learning rate<input type="number" id="lr" step="0.0001" min="0" /></label>
+        <label class="fld">lr<input type="number" id="lr" step="0.0001" min="0" /></label>
         <label class="fld">batch<input type="number" id="batch" step="32" min="8" /></label>
       </div>
       <div class="row">
-        <label class="fld">train every (steps)<input type="number" id="train_freq" step="1" min="1" /></label>
-        <label class="fld">ε floor<input type="number" id="eps_end" step="0.01" min="0" max="1" /></label>
+        <label class="fld">train every<input type="number" id="train_freq" step="1" min="1" /></label>
+        <label class="fld">eps floor<input type="number" id="eps_end" step="0.01" min="0" max="1" /></label>
       </div>
-      <div class="row"><button class="primary" id="btn_apply">Apply (no restart)</button></div>
-    </section>
+      <div class="row"><button id="btn_apply">apply (no restart)</button></div>
+    </div></section>
 
-    <section class="panel">
-      <h2>GPU monitor (read-only)</h2>
-      <table class="kv">
-        <tr><td class="k" id="gpu_name">GPU</td><td class="v" id="gpu_util">—</td></tr>
-      </table>
-      <div style="margin-top:6px; font-size:12px; color:var(--muted)">VRAM <span id="gpu_vram" class="mono">—</span></div>
+    <section class="panel"><h2>gpu monitor · read-only</h2><div class="b">
+      <table class="kv"><tr><td class="k" id="gpu_name">gpu</td><td class="v" id="gpu_util">—</td></tr></table>
+      <div style="font-size:10px; color:var(--dim); margin-top:5px">vram <span id="gpu_vram">—</span></div>
       <div class="gauge" id="gpu_vram_g"><span style="width:0%"></span></div>
-      <table class="kv" style="margin-top:8px">
-        <tr><td class="k">temperature</td><td class="v" id="gpu_temp">—</td></tr>
-        <tr><td class="k">core clock</td><td class="v" id="gpu_clock">—</td></tr>
-        <tr><td class="k">utilization</td><td class="v" id="gpu_u">—</td></tr>
+      <table class="kv" style="margin-top:6px">
+        <tr><td class="k">temp</td><td class="v" id="gpu_temp">—</td></tr>
+        <tr><td class="k">clock</td><td class="v" id="gpu_clock">—</td></tr>
+        <tr><td class="k">util</td><td class="v" id="gpu_u">—</td></tr>
       </table>
-      <div class="hint">하드웨어 오버클럭은 안전·권한 문제로 미지원(읽기전용 표시).</div>
-    </section>
-
-    <section class="panel">
-      <h2>Win-rate curve</h2>
-      <canvas id="chart" width="640" height="280"></canvas>
-    </section>
+      <div class="hint">overclock 미지원 (안전·권한) · 읽기전용</div>
+    </div></section>
   </div>
 
-  <div>
-    <section class="panel">
-      <h2>Live: minesweeper.online (real site)</h2>
-      <div class="row">
-        <input type="text" id="online_url" placeholder="https://minesweeper.online/game/..."
-               style="flex:1; min-width:240px;" />
-        <button class="primary" id="online_start">Play</button>
-        <button class="warn" id="online_stop">Stop</button>
-      </div>
-      <div class="hint" id="online_status">실제 사이트는 <b>보이는 브라우저 창</b>에서 플레이됩니다. 진행 중인 게임 URL을 붙여넣고 Play를 누르세요. (개인 시연·레이트제한·사이트 약관 준수)</div>
-      <div id="online_board_wrap" style="margin-top:10px;"></div>
-    </section>
-    <section class="panel">
-      <h2>Play sessions</h2>
-      <div class="row">
-        <label class="fld">parallel boards
-          <select id="parallel">
-            <option>1</option><option>2</option><option>3</option><option>4</option><option>5</option>
-            <option>6</option><option>7</option><option>8</option><option>9</option><option>10</option>
-            <option>11</option><option>12</option><option>13</option><option>14</option><option>15</option>
-            <option>16</option><option>17</option><option>18</option>
-          </select>
-        </label>
-        <label class="fld">difficulty
-          <select id="difficulty">
-            <option value="beginner">beginner (9×9·10)</option>
-            <option value="intermediate">intermediate (16×16·40)</option>
-            <option value="expert">expert (30×16·99)</option>
-          </select>
-        </label>
-      </div>
-      <div class="hint">모델은 크기 불변(fully-conv)이라 어떤 난이도든 플레이하지만, 학습한 난이도가 아니면 약하게 둡니다.</div>
-    </section>
-    <div class="boards" id="boards"></div>
-  </div>
+  <section class="panel"><h2>win-rate curve</h2><div class="b">
+    <canvas id="chart" width="1200" height="200"></canvas>
+  </div></section>
+
+  <section class="panel"><h2>live · minesweeper.online (real site)</h2><div class="b">
+    <div class="row">
+      <input type="text" id="online_url" placeholder="https://minesweeper.online/game/..." style="flex:1; min-width:220px" />
+      <button id="online_start">play</button>
+      <button id="online_stop">stop</button>
+    </div>
+    <div class="hint" id="online_status">실제 사이트는 보이는 브라우저 창에서 플레이됩니다. 진행 중인 게임 URL을 붙여넣고 play. (개인 시연·레이트제한·약관 준수)</div>
+    <div id="online_board_wrap" style="margin-top:8px"></div>
+  </div></section>
+
+  <section class="panel"><h2>play sessions</h2><div class="b">
+    <div class="row">
+      <label class="fld">parallel
+        <select id="parallel">
+          <option>1</option><option>2</option><option>3</option><option>4</option><option>5</option>
+          <option>6</option><option>7</option><option>8</option><option>9</option><option>10</option>
+          <option>11</option><option>12</option><option>13</option><option>14</option><option>15</option>
+          <option>16</option><option>17</option><option>18</option>
+        </select>
+      </label>
+      <label class="fld">difficulty
+        <select id="difficulty">
+          <option value="beginner">beginner 9x9 / 10</option>
+          <option value="intermediate">intermediate 16x16 / 40</option>
+          <option value="expert">expert 30x16 / 99</option>
+        </select>
+      </label>
+    </div>
+  </div></section>
+  <div class="boards" id="boards"></div>
 </main>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -263,7 +252,7 @@ function connect(){
       renderBoard(m.slot, m.cells, m.last);
       const o = slots[m.slot]; if (o) o.stat.textContent = `${m.move}수 · ${(m.elapsedMs/1000).toFixed(1)}s`;
     } else if (m.type === "board_result") {
-      const o = slots[m.slot]; if (o) o.stat.innerHTML = (m.won?`<span style="color:var(--safe)">WON</span>`:`<span style="color:var(--danger)">LOST</span>`) + ` · ${m.moves}수 · ${(m.elapsedMs/1000).toFixed(1)}s`;
+      const o = slots[m.slot]; if (o) o.stat.innerHTML = (m.won?`<span style="color:var(--ok)">WON</span>`:`<span style="color:var(--bad)">LOST</span>`) + ` · ${m.moves}수 · ${(m.elapsedMs/1000).toFixed(1)}s`;
     } else if (m.type === "board_remove") removeBoard(m.slot);
     else if (m.type === "online_start") buildOnlineGrid(m.rows, m.cols);
     else if (m.type === "online_board") {
@@ -271,10 +260,10 @@ function connect(){
       $("online_status").textContent = `${m.rows}×${m.cols} · ${m.move}수 · ${m.status}` + (m.mines!=null?` · mines ${m.mines}`:"");
     } else if (m.type === "online_result") {
       $("online_status").innerHTML = m.won
-        ? `<span style="color:var(--safe)">WON</span> in ${m.moves} moves`
-        : `<span style="color:var(--danger)">LOST</span> in ${m.moves} moves`;
+        ? `<span style="color:var(--ok)">WON</span> in ${m.moves} moves`
+        : `<span style="color:var(--bad)">LOST</span> in ${m.moves} moves`;
     } else if (m.type === "online_error") {
-      $("online_status").innerHTML = `<span style="color:var(--danger)">${m.msg}</span>`;
+      $("online_status").innerHTML = `<span style="color:var(--bad)">${m.msg}</span>`;
     } else if (m.type === "online_status") {
       $("online_status").textContent = "browser: " + m.status;
     }
@@ -294,7 +283,7 @@ function applyStatus(s){
   $("train_status").className = "badge " + st; $("train_status").textContent = st.toUpperCase();
   $("m_status").textContent = st;
   $("m_since").textContent = (s.trained_since_creation ?? 0).toLocaleString();
-  $("btn_pause").textContent = (st === "paused") ? "Resume" : "Pause";
+  $("btn_pause").textContent = (st === "paused") ? "resume" : "pause";
   const L = s.latest || {};
   $("m_eval").textContent = fmtPct(s.best_eval);
   $("m_train").textContent = fmtPct(L.train_wr);
@@ -333,7 +322,7 @@ function applyStatus(s){
 }
 
 async function post(url, body){ try { await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}); } catch(e){} }
-$("btn_pause").onclick = () => post("/api/control", {action: $("btn_pause").textContent==="Pause" ? "pause":"resume"});
+$("btn_pause").onclick = () => post("/api/control", {action: $("btn_pause").textContent==="pause" ? "pause":"resume"});
 $("btn_stop").onclick = () => post("/api/control", {action:"stop"});
 $("btn_start").onclick = () => post("/api/control", {action:"start"});
 $("btn_apply").onclick = () => post("/api/config", {
@@ -351,15 +340,15 @@ $("online_stop").onclick = () => post("/api/online", {action:"stop"});
 
 function drawChart(series){
   const cv=$("chart"), ctx=cv.getContext("2d"), W=cv.width, H=cv.height, pad=34;
-  ctx.clearRect(0,0,W,H); ctx.strokeStyle="#2a313c"; ctx.fillStyle="#8b949e"; ctx.lineWidth=1; ctx.font="11px ui-monospace";
+  ctx.clearRect(0,0,W,H); ctx.strokeStyle="#1e2630"; ctx.fillStyle="#697078"; ctx.lineWidth=1; ctx.font="11px ui-monospace";
   for (let g=0; g<=4; g++){ const y=pad+(H-2*pad)*(1-g/4); ctx.beginPath(); ctx.moveTo(pad,y); ctx.lineTo(W-8,y); ctx.stroke(); ctx.fillText((g*25)+"%",4,y+3); }
   if (!series.length) return;
   const eps=series.map(s=>s.episode), xmin=eps[0], xmax=eps[eps.length-1]||1;
   const X=e=>pad+(W-pad-8)*((e-xmin)/Math.max(1,xmax-xmin)), Y=v=>pad+(H-2*pad)*(1-Math.max(0,Math.min(1,v)));
   const line=(k,c)=>{ ctx.strokeStyle=c; ctx.lineWidth=2; ctx.beginPath(); series.forEach((s,i)=>{const x=X(s.episode),y=Y(s[k]); i?ctx.lineTo(x,y):ctx.moveTo(x,y);}); ctx.stroke(); };
-  line("train_wr","#3a4757"); line("eval_wr","#2ea043");
-  ctx.fillStyle="#8b949e"; ctx.fillText("ep "+xmin,pad,H-10); ctx.fillText("ep "+xmax,W-72,H-10);
-  ctx.fillStyle="#2ea043"; ctx.fillText("eval",W-72,pad+2); ctx.fillStyle="#5a6b7d"; ctx.fillText("train",W-40,pad+2);
+  line("train_wr","#3a4757"); line("eval_wr","#43b04a");
+  ctx.fillStyle="#697078"; ctx.fillText("ep "+xmin,pad,H-10); ctx.fillText("ep "+xmax,W-72,H-10);
+  ctx.fillStyle="#43b04a"; ctx.fillText("eval",W-72,pad+2); ctx.fillStyle="#5a6b7d"; ctx.fillText("train",W-40,pad+2);
 }
 </script>
 </body>
