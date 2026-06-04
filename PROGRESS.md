@@ -45,11 +45,11 @@
 > 멈춤 규칙(하네스 §3)으로 멈췄을 때 여기에 적는다: 증상 / 재현 방법 / 시도한 것 / 가설 / 필요한 결정.
 
 - **[해결됨] M3 DB 환경** (2026-06-04): 사용자가 **개발용 SQLite 승인**. 포터블 타입으로 작성해 Postgres 호환 유지, `alembic upgrade head` 성공. docker-compose+PG는 CI/운영용으로 작성. (결정 로그 참조)
-- **[M4 진입 블로커 가능성] PyTorch ↔ Python 버전** (2026-06-04)
-  - **증상(예상)**: M4는 CUDA torch 필요. 현재 설치된 Python은 **3.14뿐**(3.12는 `py -0` 등록만 있고 디스크에 없음). PyTorch는 보통 3.11/3.12 휠만 제공(가이드 §1, 3.13+ 늦음) → **3.14용 torch 휠 부재 가능성 큼**.
-  - **GPU**: RTX 4060 Laptop(driver 556.12) **존재·호환**(CUDA 12.x). GPU는 문제 아님.
-  - **필요한 결정/조치**: **Python 3.12 설치** 후 `server/.venv`를 3.12로 재생성하고 의존성+CUDA torch(cu124) 재설치 → `torch.cuda.is_available()` True 확인. (서버 deps는 3.12에서도 동일하게 설치됨.)
-  - **대안**: 3.14에서 torch 설치를 일단 시도해보고 실패 시 3.12로 전환. M4 착수 시 먼저 검증.
+- **[M4 진입 블로커 — 확정] PyTorch ↔ Python 버전** (2026-06-04)
+  - **확인됨**: `pip install torch --index-url .../cu124 --dry-run`이 Python 3.14에서 **"No matching distribution"**(cp314 휠 없음). GPU(RTX 4060, driver 556.12)는 존재·CUDA 12.x 호환 → GPU는 문제 아님.
+  - **조치(필수)**: **Python 3.12 설치** → `server/.venv`를 3.12로 재생성 → `pip install -e ".[dev]"` 재설치 → `pip install torch --index-url https://download.pytorch.org/whl/cu124` → `torch.cuda.is_available()` True 확인(가이드 §3).
+  - **필요한 결정**: Python 3.12 설치를 ① 사용자가 직접(python.org) / ② Claude가 `winget install Python.Python.3.12` 또는 `uv python install 3.12`로(시스템 변경 동의 필요). 결정 전까지 M4 미착수.
+  - 서버(M3) 코드는 3.12에서도 동일 동작(의존성 모두 3.12 휠 존재).
 
 ---
 
