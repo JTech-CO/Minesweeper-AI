@@ -44,7 +44,13 @@
 ## 미결 질문 / 블로커 (사용자 결정 필요)
 > 멈춤 규칙(하네스 §3)으로 멈췄을 때 여기에 적는다: 증상 / 재현 방법 / 시도한 것 / 가설 / 필요한 결정.
 
-- (없음)
+- **[M3 블로커] DB 환경 미비** (2026-06-04)
+  - **증상**: M3 DoD #1 `docker compose up -d db` → `alembic upgrade head`가 불가. 
+  - **재현/확인**: Bash·PowerShell 모두 `docker` 미존재(Program Files에 Docker Desktop 없음), `psql`·postgres 서비스 없음. Python은 3.14.0 존재(요구 3.11+ 충족).
+  - **가설**: 로컬에 Docker/Postgres가 설치돼 있지 않음(외부 제약, 하네스 §4).
+  - **추가 리스크**: Python **3.14**는 매우 신버전 → 일부 패키지(특히 M4 `torch`) 휠 미제공 가능. M3 의존(fastapi/sqlalchemy/alembic/pydantic/psycopg)은 대체로 가능하나 미검증.
+  - **필요한 결정**(택1): ① Docker Desktop 설치(사양 준수, 이후 전체 스택에도 필요) / ② 로컬 Postgres16 설치 / ③ **개발용 SQLite 승인**(즉시 진행, 사양 일부 이탈 — 포터블 타입 유지, CI/운영은 Postgres) / ④ 지금 멈추고 다음 세션.
+  - **불변식 준수**: ③은 아키텍처 이탈이라 **사용자 승인 전 임의 적용 금지**(§5). 결정 전까지 M3 미착수.
 
 ---
 
