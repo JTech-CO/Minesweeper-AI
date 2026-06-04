@@ -25,6 +25,12 @@ venv/
 *.onnx
 *.ckpt
 
+# Local SQLite dev database + model storage
+*.db
+*.sqlite
+*.sqlite3
+/server/storage/
+
 # Test / coverage
 coverage/
 

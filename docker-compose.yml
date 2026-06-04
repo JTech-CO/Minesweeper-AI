@@ -1,0 +1,32 @@
+# Local dev / CI database (and, later, the server image). 기술백서 §3.1, 파일트리 §3.1.
+# Local development can also run against SQLite with no Docker (see .env.example);
+# this compose file provides Postgres 16 for parity with CI/production.
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-msai}
+      POSTGRES_USER: ${POSTGRES_USER:-msai}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-msai} -d ${POSTGRES_DB:-msai}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Server image is built in M10; uncomment once server/Dockerfile lands.
+  # server:
+  #   build: ./server
+  #   env_file: .env
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
+  #   ports:
+  #     - "8000:8000"
+
+volumes:
+  pgdata: {}

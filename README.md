@@ -27,13 +27,29 @@ pnpm -r exec tsc --noEmit          # 타입체크
 pnpm lint                          # eslint (패키지 경계 룰 포함)
 ```
 
+## 개발 (서버, Python)
+
+로컬 개발은 기본 SQLite(무설치). CI/운영은 Postgres 16(`docker compose up -d db`).
+학습(M4)에는 CUDA PyTorch가 필요하며 Python 3.11/3.12 권장(docs/지뢰찾기AI_로컬환경_4060.md).
+
+```bash
+cd server
+python -m venv .venv && .venv\Scripts\activate   # Windows
+pip install -e ".[dev]"
+alembic upgrade head                # 테이블 생성 (dev: sqlite:///./msai.db)
+uvicorn app.main:app --reload --port 8000
+pytest                              # /health + 모델 CRUD
+ruff check . && ruff format --check .
+```
+
 ## 진행 상태
 
 | Phase | 내용 | 상태 |
 |---|---|---|
 | M1 | `@msai/core` 엔진 (보드·캐스케이드·3BV·env) | ✅ 완료 |
 | M2 | `@msai/core` 논리 솔버 (단일점·부분집합·CSP·확률·NG 생성) | ✅ 완료 |
-| M3 | `server` 골격 (FastAPI + DB + 마이그레이션) | 진행 예정 |
-| M4–M10 | 학습·메트릭·커리큘럼·ONNX·web·확장·배포 | 예정 |
+| M3 | `server` 골격 (FastAPI + SQLAlchemy + Alembic + /health·모델 CRUD) | ✅ 완료 |
+| M4 | `server/trainer` 학습 (Double DQN, 커리큘럼) — torch | 진행 예정 |
+| M5–M10 | 메트릭·커리큘럼·ONNX·web·확장·배포 | 예정 |
 
 자세한 내용은 `PROGRESS.md` 참조.
