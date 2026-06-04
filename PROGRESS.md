@@ -27,16 +27,17 @@
 
 ---
 
-## 다음 할 일 (구체적으로) — M4 trainer ★ (학습 핵심)
-> **진입조건(하네스 M4)**: M3 통과 + **CUDA torch 검증**(`torch.cuda.is_available()` True). GPU(4060)는 있음. **torch 휠을 위해 Python 3.12 필요**(미결 참조) — 먼저 해결.
-0. **(블로커 해결)** Python 3.12 설치 → `server/.venv` 3.12로 재생성 → 기존 의존성 재설치 → `pip install torch --index-url https://download.pytorch.org/whl/cu124`(가이드 §2) → `torch.cuda.is_available()` True 확인(§3).
-1. `server/trainer/env.py` — **`@msai/core` board.ts 규칙 1:1 재현**(불변식): flat row-major, 첫클릭 `safe-area`(클릭+8이웃 안전, 공간부족시 safe-cell), BFS 캐스케이드, 승패, `legalActionMask`. `tests/test_env.py`로 시드 결정론·규칙 검증.
-2. `trainer/encoding.py` — (H,W,C) 다채널(hidden/flag/숫자0~8 원핫 + 선택채널). M7에서 `agent/encoding.ts`와 패리티.
-3. `trainer/model.py`(fully-conv CNN, +dueling) · `replay.py`(PER) · `dqn.py`(Double DQN·target·n-step) · `reward.py`(TS `DEFAULT_REWARD` 미러 정본화).
-4. `trainer/train.py` — 에피소드 루프·ε 스케줄·체크포인트(.pt)·평가 콜백.
-5. **DoD**: Beginner 평가 승률 **우상향→게이트(예 0.85) 도달** · loss 비발산 · 체크포인트 재로드 재현 · `test_env.py` 그린. loss만 보고 완료판정 금지(런북 4: 마스킹부터 확인).
+## 다음 할 일 (구체적으로) — M4 trainer ★ (학습 핵심) · **진행 중**
+> 진입조건 충족: `torch.cuda.is_available()` True(2.6.0+cu124, RTX 4060). 환경 셋업·`env.py` 완료.
+- [x] 0. 환경: Python 3.12 venv + CUDA torch + numpy (커밋 `9db0dd2`).
+- [x] 1. `trainer/env.py` — board.ts 규칙 1:1 재현 + `tests/test_env.py` 12 그린 (커밋 `58839f6`). **DoD #4 충족.**
+- [ ] 2. `trainer/encoding.py` — (H,W,C) 다채널(hidden/flag/숫자0~8 원핫 + 선택: 잔여지뢰 정규화·프론티어). M7에서 `agent/encoding.ts`와 패리티 대상.
+- [ ] 3. `trainer/model.py`(fully-conv CNN, residual ×4~6, 1×1 conv 출력, +dueling) · `replay.py`(PER) · `dqn.py`(Double DQN·target·n-step) · `reward.py`(env.py `RewardConfig` 사용).
+- [ ] 4. `trainer/train.py` — 에피소드 루프·ε 1.0→0.01·**행동 마스킹**(필수)·체크포인트(.pt)·평가 콜백. `evaluate.py`(승률).
+- [ ] 5. 학습 실행: Beginner 승률 **우상향→게이트(예 0.85)**. loss 비발산·체크포인트 재로드 재현 확인.
+- **DoD**: 위 5 완료(승률 게이트 도달이 핵심). loss만 보고 완료판정 금지.
 
-> 주의: 게임 규칙 이중구현 동기화(불변식 §5). 학습 평평하면 하네스 런북 4(행동 마스킹 누락이 가장 흔함). pyproject에 numpy(+M5 websockets·M7 onnx)도 추가.
+> 주의: 학습 평평하면 하네스 런북 4(**행동 마스킹 누락이 가장 흔함** → -∞ 마스킹). 5×5 초소형 과적합(sanity)으로 학습 파이프라인 먼저 검증 권장. 장시간 GPU 학습이므로 background 실행 고려. pyproject에 M5 websockets·M7 onnx는 해당 phase에 추가.
 
 ---
 
@@ -76,3 +77,4 @@
 - **2026-06-04**: 레포 스캐폴딩(pnpm workspace·tsconfig.base·eslint 경계룰·prettier·.gitignore) + `@msai/core` M1 구현(types/rng/board/difficulty/metrics/env/index). vitest 32/32 그린, tsc·eslint 클린. M1 DoD 5항목 전부 통과. 다음: M2 솔버.
 - **2026-06-04**: 문서 5개 `docs/`로 이동(`git mv`). M2 솔버 구현(view/single-point/patterns(subset)/csp/probability/index + 보드 cloneBoard). 거짓양성 버그 1건(바다-경계 이중계상) 검출·근본수정. vitest 40/40, tsc·eslint 클린. M2 DoD 3항목 통과(거짓양성0·NG~100%·확률 일치). 다음: M3 server 골격(환경 확인 필요).
 - **2026-06-04**: M3 DB 블로커(Docker/PG 미설치) → 사용자 SQLite 승인. 서버 venv(Python 3.14) + 의존성 설치. FastAPI 골격(config/deps/db/session/models/schemas/api: /health·models CRUD·training·benchmark) + Alembic(초기 마이그레이션, SQLite `upgrade head` 성공, `alembic check` 무드리프트). pytest 3 그린, ruff 클린, uvicorn 실기동 /health 200. M3 DoD 4항목 통과. 다음: **M4 trainer — 단, torch용 Python 3.12 설치 필요(블로커 가능성)**.
+- **2026-06-04**: M4 착수. uv로 Python 3.12 설치, venv 재생성, torch 2.6.0+cu124 설치 → `torch.cuda.is_available()` True(RTX 4060). `trainer/env.py`(board.ts 1:1 재현) + `tests/test_env.py` 12 그린 → M4 DoD #4 충족. pytest 15, ruff 클린. **다음: encoding/model/replay/dqn/reward/train 구현 + Beginner 학습→승률 게이트(장시간).**
