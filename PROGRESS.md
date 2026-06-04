@@ -31,13 +31,18 @@
 > 진입조건 충족: `torch.cuda.is_available()` True(2.6.0+cu124, RTX 4060). 환경 셋업·`env.py` 완료.
 - [x] 0. 환경: Python 3.12 venv + CUDA torch + numpy (커밋 `9db0dd2`).
 - [x] 1. `trainer/env.py` — board.ts 규칙 1:1 재현 + `tests/test_env.py` 12 그린 (커밋 `58839f6`). **DoD #4 충족.**
-- [ ] 2. `trainer/encoding.py` — (H,W,C) 다채널(hidden/flag/숫자0~8 원핫 + 선택: 잔여지뢰 정규화·프론티어). M7에서 `agent/encoding.ts`와 패리티 대상.
-- [ ] 3. `trainer/model.py`(fully-conv CNN, residual ×4~6, 1×1 conv 출력, +dueling) · `replay.py`(PER) · `dqn.py`(Double DQN·target·n-step) · `reward.py`(env.py `RewardConfig` 사용).
-- [ ] 4. `trainer/train.py` — 에피소드 루프·ε 1.0→0.01·**행동 마스킹**(필수)·체크포인트(.pt)·평가 콜백. `evaluate.py`(승률).
-- [ ] 5. 학습 실행: Beginner 승률 **우상향→게이트(예 0.85)**. loss 비발산·체크포인트 재로드 재현 확인.
-- **DoD**: 위 5 완료(승률 게이트 도달이 핵심). loss만 보고 완료판정 금지.
+- [x] 2. `trainer/encoding.py` — (11,H,W) 채널: hidden + 숫자0~8 원핫 + 지뢰밀도. **M7 패리티 계약**(`agent/encoding.ts`와 동일해야 함, docstring에 명시).
+- [x] 3. `trainer/model.py`(fully-conv residual QNet, no BN) · `replay.py`(PER sum-tree) · `dqn.py`(Double DQN·n-step·target, **외부 마스킹+유한 MASK_VALUE로 terminal NaN 방지**) · `reward.py`.
+- [x] 4. `trainer/train.py`(ε/β 스케줄·`--train-freq`·체크포인트·게이트 조기종료) · `evaluate.py`. `tests/test_trainer_shapes.py` 5 그린.
+- [~] 5. **sanity(5×5×3) 학습 확인**: eval 0.32→0.66 단조상승, loss 안정. **체크포인트 재로드 추론 재현(0.66→0.66)**. → **DoD #2·#3 충족.** **Beginner 학습은 background 진행 중**(아래).
+- **DoD #1만 남음**: Beginner eval 승률 게이트(0.85) 도달.
 
-> 주의: 학습 평평하면 하네스 런북 4(**행동 마스킹 누락이 가장 흔함** → -∞ 마스킹). 5×5 초소형 과적합(sanity)으로 학습 파이프라인 먼저 검증 권장. 장시간 GPU 학습이므로 background 실행 고려. pyproject에 M5 websockets·M7 onnx는 해당 phase에 추가.
+### Beginner 백그라운드 학습 (진행 중)
+- 실행: `python -m trainer.train --difficulty beginner --train-freq 4 --gate 0.85 --tag beginner ...` (PID는 `server/storage/checkpoints/beginner.pid`).
+- 로그: `server/storage/checkpoints/beginner.out`(stdout) / `beginner.err`(stderr) / `beginner_metrics.csv`(eval 추이). 체크포인트: `beginner_best.pt`.
+- 모니터: `Get-Content beginner.out -Tail 20` 또는 `beginner_metrics.csv` 확인. 첫 eval=ep 5000. 게이트 도달 시 자동 종료.
+- 멈출 때: `Stop-Process -Id <pid>`.
+> 학습 평평하면 런북 4(마스킹은 검증됨). 0.85 미도달·정체 시 하이퍼파라미터(lr·eps decay·width) 튜닝은 후속.
 
 ---
 
@@ -78,3 +83,4 @@
 - **2026-06-04**: 문서 5개 `docs/`로 이동(`git mv`). M2 솔버 구현(view/single-point/patterns(subset)/csp/probability/index + 보드 cloneBoard). 거짓양성 버그 1건(바다-경계 이중계상) 검출·근본수정. vitest 40/40, tsc·eslint 클린. M2 DoD 3항목 통과(거짓양성0·NG~100%·확률 일치). 다음: M3 server 골격(환경 확인 필요).
 - **2026-06-04**: M3 DB 블로커(Docker/PG 미설치) → 사용자 SQLite 승인. 서버 venv(Python 3.14) + 의존성 설치. FastAPI 골격(config/deps/db/session/models/schemas/api: /health·models CRUD·training·benchmark) + Alembic(초기 마이그레이션, SQLite `upgrade head` 성공, `alembic check` 무드리프트). pytest 3 그린, ruff 클린, uvicorn 실기동 /health 200. M3 DoD 4항목 통과. 다음: **M4 trainer — 단, torch용 Python 3.12 설치 필요(블로커 가능성)**.
 - **2026-06-04**: M4 착수. uv로 Python 3.12 설치, venv 재생성, torch 2.6.0+cu124 설치 → `torch.cuda.is_available()` True(RTX 4060). `trainer/env.py`(board.ts 1:1 재현) + `tests/test_env.py` 12 그린 → M4 DoD #4 충족. pytest 15, ruff 클린. **다음: encoding/model/replay/dqn/reward/train 구현 + Beginner 학습→승률 게이트(장시간).**
+- **2026-06-04**: M4 트레이너 전부 구현(encoding/model/replay(PER)/dqn(Double DQN·n-step·마스킹)/reward/train/evaluate) + shape 테스트 5. sanity(5×5×3) eval 0.32→0.66 단조상승·loss 안정, 체크포인트 재로드 재현(0.66→0.66) → DoD #2·#3·#4 충족. **Beginner 학습 background 시작(PID `beginner.pid`).** 남은 것: DoD #1(승률 0.85 게이트). pytest 20, ruff 클린.
