@@ -41,7 +41,7 @@
 - 실행: `python -m trainer.train --difficulty beginner --train-freq 4 --gate 0.85 --tag beginner ...` (PID는 `server/storage/checkpoints/beginner.pid`).
 - 로그: `server/storage/checkpoints/beginner.out`(stdout) / `beginner.err`(stderr) / `beginner_metrics.csv`(eval 추이). 체크포인트: `beginner_best.pt`.
 - 모니터: `Get-Content beginner.out -Tail 20` 또는 `beginner_metrics.csv` 확인. 첫 eval=ep 5000. 게이트 도달 시 자동 종료.
-- **라이브 뷰어**(별도 터미널): `python -m trainer.watch --tag beginner` → 좌측 AI 플레이(한 수씩·컬러), 우측 메트릭/승률 스파크라인. 체크포인트를 게임마다 리로드해 학습 진척 반영. (풀 웹 대시보드는 M8.)
+- **웹 대시보드**(브라우저 자동): `python -m trainer.dashboard --tag beginner` → http://127.0.0.1:8800. 서버가 모델로 플레이→**WebSocket으로 한 수씩 스트리밍**, 브라우저가 보드/클릭시퀀스/풀이시간/승패 + 승률곡선·loss·ε 렌더(`dashboard.html`, 디자인 토큰·anti-cliché). 터미널 뷰어 `trainer.watch`도 동일 정보 제공. (클라이언트 ONNX 추론 풀 React 대시보드는 M8.)
 - 멈출 때: `Stop-Process -Id <pid>`.
 > 학습 평평하면 런북 4(마스킹은 검증됨). 0.85 미도달·정체 시 하이퍼파라미터(lr·eps decay·width) 튜닝은 후속.
 
@@ -86,3 +86,4 @@
 - **2026-06-04**: M4 착수. uv로 Python 3.12 설치, venv 재생성, torch 2.6.0+cu124 설치 → `torch.cuda.is_available()` True(RTX 4060). `trainer/env.py`(board.ts 1:1 재현) + `tests/test_env.py` 12 그린 → M4 DoD #4 충족. pytest 15, ruff 클린. **다음: encoding/model/replay/dqn/reward/train 구현 + Beginner 학습→승률 게이트(장시간).**
 - **2026-06-04**: M4 트레이너 전부 구현(encoding/model/replay(PER)/dqn(Double DQN·n-step·마스킹)/reward/train/evaluate) + shape 테스트 5. sanity(5×5×3) eval 0.32→0.66 단조상승·loss 안정, 체크포인트 재로드 재현(0.66→0.66) → DoD #2·#3·#4 충족. **Beginner 학습 background 시작(PID `beginner.pid`).** 남은 것: DoD #1(승률 0.85 게이트). pytest 20, ruff 클린.
 - **2026-06-04**: 사용자 요청으로 **라이브 터미널 뷰어 `trainer/watch.py`** 추가(rich). AI 플레이(한 수씩·컬러) + 학습 메트릭/승률 스파크라인 실시간. 백그라운드 학습의 체크포인트·로그·CSV를 읽어 반영. smoke 통과, ruff 클린. (M8 웹 대시보드 전까지의 경량 관찰 도구.)
+- **2026-06-04**: 사용자 요청으로 **웹 대시보드 `trainer/dashboard.py` + `dashboard.html`** 추가(FastAPI+WebSocket+websockets). 서버가 모델로 플레이→WS로 보드/클릭/풀이시간/승패 스트리밍, 브라우저가 렌더 + `/metrics`로 승률곡선·loss·ε. 다크 계측기 UI(디자인 토큰·anti-cliché 준수). E2E 검증(HTML·/metrics·WS frames), ruff·pytest 그린. Beginner 학습은 계속 진행 중(관찰만).

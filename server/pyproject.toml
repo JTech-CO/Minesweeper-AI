@@ -11,6 +11,7 @@ dependencies = [
   "pydantic>=2.7",
   "pydantic-settings>=2.3",
   "numpy>=1.26",
+  "websockets>=12",
 ]
 # NOTE: torch is intentionally NOT listed here. Install the CUDA build separately so
 # pip/uv doesn't pull a CPU wheel from PyPI (로컬환경 가이드 §2):

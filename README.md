@@ -48,10 +48,15 @@ ruff check . && ruff format --check .
 # 학습 시작 (백그라운드 권장: 로그/메트릭/체크포인트가 storage/checkpoints에 쌓임)
 python -m trainer.train --difficulty beginner --train-freq 4 --gate 0.85 --tag beginner
 
-# 다른 터미널에서 라이브 뷰어: 좌측=AI 플레이(한 수씩, 컬러), 우측=학습 메트릭/승률 곡선
+# ── 웹 대시보드(권장): 브라우저가 자동으로 열림 ──
+# 좌측: 모델이 보드를 한 수씩 플레이(클릭 시퀀스·풀이 시간·승패), 우측: 승률 곡선·loss·ε
+python -m trainer.dashboard --tag beginner      # http://127.0.0.1:8800
+
+# 터미널 뷰어(브라우저 없이): 동일 정보를 컬러 ASCII로
 python -m trainer.watch --tag beginner
 ```
-> 풀 웹 대시보드(실시간 차트 + 플레이 시각화)는 M8 산출물이며, `trainer/watch.py`는 그전까지의 경량 터미널 관찰 도구다.
+> 두 뷰어 모두 백그라운드 학습의 체크포인트·메트릭을 읽어 실시간 반영한다. 서버가 모델로 플레이해
+> WebSocket으로 브라우저에 스트리밍하는 방식(클라이언트 ONNX 추론을 쓰는 풀 React 대시보드는 M8).
 
 ## 진행 상태
 

@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Minesweeper AI — Live</title>
+<style>
+  :root {
+    --bg:#0e1116; --surface:#161b22; --surface2:#1b222c; --border:#2a313c;
+    --text:#e6edf3; --muted:#8b949e; --accent:#4c8dff; --safe:#2ea043; --danger:#d2453f; --guess:#d2a23f;
+    --n1:#4c8dff; --n2:#2ea043; --n3:#d2453f; --n4:#a371f7;
+    --n5:#d2a23f; --n6:#3fb0d2; --n7:#c9d1d9; --n8:#8b949e;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif; font-size:14px;
+  }
+  .mono { font-family:ui-monospace,"JetBrains Mono",Consolas,monospace; }
+  header {
+    display:flex; align-items:center; gap:14px; padding:12px 18px;
+    border-bottom:1px solid var(--border); background:var(--surface);
+  }
+  header h1 { font-size:15px; font-weight:600; margin:0; letter-spacing:.2px; }
+  header .info { color:var(--muted); font-size:12.5px; }
+  .dot { width:9px; height:9px; border-radius:50%; background:var(--danger); display:inline-block; }
+  .dot.on { background:var(--safe); }
+  main {
+    display:grid; grid-template-columns:minmax(320px,1fr) 360px;
+    gap:16px; padding:16px; align-items:start;
+  }
+  .panel {
+    background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:14px;
+  }
+  .panel h2 {
+    font-size:12px; font-weight:600; color:var(--muted); text-transform:uppercase;
+    letter-spacing:.6px; margin:0 0 10px;
+  }
+  .boardwrap { display:flex; justify-content:center; padding:8px 0 14px; }
+  #board { display:grid; gap:2px; }
+  .cell {
+    width:30px; height:30px; display:flex; align-items:center; justify-content:center;
+    border-radius:3px; font-weight:700; font-family:ui-monospace,Consolas,monospace; font-size:15px;
+    background:var(--surface2); color:var(--text); transition:background .12s ease;
+  }
+  .cell.hidden { background:#222a35; }
+  .cell.open { background:#10151c; color:var(--muted); }
+  .cell.n1 { color:var(--n1); } .cell.n2 { color:var(--n2); }
+  .cell.n3 { color:var(--n3); } .cell.n4 { color:var(--n4); }
+  .cell.n5 { color:var(--n5); } .cell.n6 { color:var(--n6); }
+  .cell.n7 { color:var(--n7); } .cell.n8 { color:var(--n8); }
+  .cell.mine { background:#3a2026; color:var(--danger); }
+  .cell.exploded { background:var(--danger); color:#fff; }
+  .cell.flag { color:var(--guess); }
+  .cell.last { outline:2px solid var(--accent); outline-offset:-2px; }
+  .statrow { display:flex; gap:18px; flex-wrap:wrap; align-items:baseline; }
+  .stat { display:flex; flex-direction:column; gap:2px; }
+  .stat .k { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; }
+  .stat .v { font-size:20px; font-weight:600; }
+  .badge {
+    padding:3px 10px; border-radius:5px; font-size:12px; font-weight:600; border:1px solid var(--border);
+  }
+  .badge.playing { color:var(--accent); border-color:var(--accent); }
+  .badge.won { color:var(--safe); border-color:var(--safe); }
+  .badge.lost { color:var(--danger); border-color:var(--danger); }
+  .log {
+    margin-top:12px; height:150px; overflow:auto; border-top:1px solid var(--border); padding-top:8px;
+    font-family:ui-monospace,Consolas,monospace; font-size:12px; color:var(--muted);
+  }
+  .log div { padding:1px 0; }
+  .log .win { color:var(--safe); } .log .loss { color:var(--danger); }
+  .side { display:flex; flex-direction:column; gap:16px; }
+  table.kv { width:100%; border-collapse:collapse; }
+  table.kv td { padding:4px 0; font-size:13px; }
+  table.kv td.k { color:var(--muted); }
+  table.kv td.v { text-align:right; font-family:ui-monospace,Consolas,monospace; }
+  canvas { width:100%; height:150px; display:block; }
+  .tally { display:flex; gap:20px; }
+</style>
+</head>
+<body>
+<header>
+  <span class="dot" id="dot"></span>
+  <h1>Minesweeper AI — Live Play</h1>
+  <span class="info" id="boardinfo">connecting…</span>
+</header>
+<main>
+  <section class="panel">
+    <h2>Agent play</h2>
+    <div class="boardwrap"><div id="board"></div></div>
+    <div class="statrow">
+      <div class="stat"><span class="k">game</span><span class="v mono" id="game">—</span></div>
+      <div class="stat"><span class="k">move</span><span class="v mono" id="move">—</span></div>
+      <div class="stat"><span class="k">solve time</span><span class="v mono" id="time">0.0s</span></div>
+      <div class="stat"><span class="k">status</span><span class="badge playing" id="status">—</span></div>
+    </div>
+    <div class="log" id="log"></div>
+  </section>
+  <aside class="side">
+    <section class="panel">
+      <h2>Training progress</h2>
+      <table class="kv">
+        <tr><td class="k">episode</td><td class="v" id="m_ep">—</td></tr>
+        <tr><td class="k">eval win-rate</td><td class="v" id="m_eval" style="color:var(--safe)">—</td></tr>
+        <tr><td class="k">train win-rate</td><td class="v" id="m_train">—</td></tr>
+        <tr><td class="k">loss</td><td class="v" id="m_loss">—</td></tr>
+        <tr><td class="k">epsilon</td><td class="v" id="m_eps">—</td></tr>
+        <tr><td class="k">steps / sec</td><td class="v" id="m_sps">—</td></tr>
+      </table>
+    </section>
+    <section class="panel">
+      <h2>Win-rate curve</h2>
+      <canvas id="chart" width="640" height="300"></canvas>
+    </section>
+    <section class="panel">
+      <h2>Live tally</h2>
+      <div class="tally">
+        <div class="stat"><span class="k">games</span><span class="v mono" id="t_games">0</span></div>
+        <div class="stat"><span class="k">won</span><span class="v mono" id="t_won" style="color:var(--safe)">0</span></div>
+        <div class="stat"><span class="k">lost</span><span class="v mono" id="t_lost" style="color:var(--danger)">0</span></div>
+        <div class="stat"><span class="k">win-rate</span><span class="v mono" id="t_wr">—</span></div>
+      </div>
+    </section>
+  </aside>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+let cols = 0, rows = 0, cells = [], t0 = 0, running = false;
+
+const NUMCLASS = {
+  0:"open", 1:"open n1", 2:"open n2", 3:"open n3", 4:"open n4",
+  5:"open n5", 6:"open n6", 7:"open n7", 8:"open n8"
+};
+function cellView(v) {
+  if (v === -1) return {cls:"hidden", txt:""};
+  if (v === -2) return {cls:"mine", txt:"✷"};
+  if (v === -3) return {cls:"exploded", txt:"✸"};
+  if (v === -4) return {cls:"flag", txt:"⚑"};
+  return {cls:NUMCLASS[v], txt:(v === 0 ? "" : String(v))};
+}
+function buildBoard(r, c) {
+  rows = r; cols = c; cells = [];
+  const b = $("board");
+  b.innerHTML = "";
+  b.style.gridTemplateColumns = `repeat(${c}, 30px)`;
+  for (let i = 0; i < r * c; i++) {
+    const d = document.createElement("div");
+    d.className = "cell hidden";
+    b.appendChild(d); cells.push(d);
+  }
+}
+function renderStep(board, last) {
+  for (let i = 0; i < board.length; i++) {
+    const {cls, txt} = cellView(board[i]);
+    const el = cells[i];
+    el.className = "cell " + cls + (i === last ? " last" : "");
+    el.textContent = txt;
+  }
+}
+function fmtPct(x) { return (x == null || isNaN(x)) ? "—" : (x * 100).toFixed(1) + "%"; }
+
+function tickTimer() {
+  if (running) $("time").textContent = ((performance.now() - t0) / 1000).toFixed(1) + "s";
+}
+setInterval(tickTimer, 100);
+
+function addLog(html, cls) {
+  const l = $("log");
+  const d = document.createElement("div");
+  if (cls) d.className = cls;
+  d.innerHTML = html;
+  l.insertBefore(d, l.firstChild);
+  while (l.childElementCount > 80) l.removeChild(l.lastChild);
+}
+
+function connect() {
+  const ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onopen = () => { $("dot").classList.add("on"); };
+  ws.onclose = () => { $("dot").classList.remove("on"); setTimeout(connect, 1500); };
+  ws.onmessage = (ev) => {
+    const m = JSON.parse(ev.data);
+    if (m.type === "start") {
+      buildBoard(m.rows, m.cols);
+      $("game").textContent = m.game;
+      $("boardinfo").textContent = `board ${m.rows}×${m.cols} · ${m.mines} mines`
+        + (m.ckpt ? ` · checkpoint eval ${fmtPct(m.ckpt.eval_wr)} @ ep ${m.ckpt.episode}` : "");
+      t0 = performance.now(); running = true;
+      $("status").className = "badge playing"; $("status").textContent = "PLAYING";
+    } else if (m.type === "step") {
+      renderStep(m.board, m.last);
+      $("move").textContent = m.move;
+      $("time").textContent = (m.elapsedMs / 1000).toFixed(1) + "s";
+      const r = Math.floor(m.last / cols), c = m.last % cols;
+      addLog(`move ${String(m.move).padStart(2, " ")} → (r${r}, c${c})`);
+    } else if (m.type === "result") {
+      running = false;
+      $("status").className = "badge " + (m.won ? "won" : "lost");
+      $("status").textContent = m.won ? "WON" : "LOST";
+      $("t_games").textContent = m.games;
+      $("t_won").textContent = m.wins;
+      $("t_lost").textContent = m.games - m.wins;
+      $("t_wr").textContent = fmtPct(m.wins / m.games);
+      const verdict = m.won ? "WON" : "LOST";
+      addLog(`game ${m.games}: <b>${verdict}</b> in ${m.moves} moves · ${(m.elapsedMs / 1000).toFixed(1)}s`,
+        m.won ? "win" : "loss");
+    }
+  };
+}
+connect();
+
+async function refreshMetrics() {
+  try {
+    const r = await fetch("/metrics");
+    const d = await r.json();
+    const L = d.latest || {};
+    $("m_ep").textContent = L.episode ?? "—";
+    $("m_eval").textContent = fmtPct(L.eval_wr);
+    $("m_train").textContent = fmtPct(L.train_wr);
+    $("m_loss").textContent = L.loss ?? "—";
+    $("m_eps").textContent = (L.eps == null) ? "—" : Number(L.eps).toFixed(3);
+    $("m_sps").textContent = (L.sps == null) ? "—" : Math.round(L.sps);
+    drawChart(d.series || []);
+  } catch (e) { /* training not started yet */ }
+}
+setInterval(refreshMetrics, 4000); refreshMetrics();
+
+function drawChart(series) {
+  const cv = $("chart"), ctx = cv.getContext("2d");
+  const W = cv.width, H = cv.height, pad = 34;
+  ctx.clearRect(0, 0, W, H);
+  ctx.strokeStyle = "#2a313c"; ctx.fillStyle = "#8b949e"; ctx.lineWidth = 1;
+  ctx.font = "11px ui-monospace";
+  for (let g = 0; g <= 4; g++) {
+    const y = pad + (H - 2 * pad) * (1 - g / 4);
+    ctx.beginPath(); ctx.moveTo(pad, y); ctx.lineTo(W - 8, y); ctx.stroke();
+    ctx.fillText((g * 25) + "%", 4, y + 3);
+  }
+  if (!series.length) return;
+  const eps = series.map((s) => s.episode);
+  const xmin = eps[0], xmax = eps[eps.length - 1] || 1;
+  const X = (e) => pad + (W - pad - 8) * ((e - xmin) / Math.max(1, (xmax - xmin)));
+  const Y = (v) => pad + (H - 2 * pad) * (1 - Math.max(0, Math.min(1, v)));
+  const line = (key, color) => {
+    ctx.strokeStyle = color; ctx.lineWidth = 2; ctx.beginPath();
+    series.forEach((s, i) => {
+      const x = X(s.episode), y = Y(s[key]);
+      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+    });
+    ctx.stroke();
+  };
+  line("train_wr", "#3a4757");
+  line("eval_wr", "#2ea043");
+  ctx.fillStyle = "#8b949e";
+  ctx.fillText("ep " + xmin, pad, H - 10);
+  ctx.fillText("ep " + xmax, W - 70, H - 10);
+  ctx.fillStyle = "#2ea043"; ctx.fillText("eval", W - 70, pad + 2);
+  ctx.fillStyle = "#5a6b7d"; ctx.fillText("train", W - 40, pad + 2);
+}
+</script>
+</body>
+</html>
