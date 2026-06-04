@@ -31,8 +31,10 @@
   .count { margin-left:auto; text-align:right; }
   .count .k { font-size:9px; color:var(--dim); letter-spacing:1px; text-transform:uppercase; }
   .count .v { font-size:16px; font-weight:700; color:var(--ok); }
-  main { padding:8px; display:flex; flex-direction:column; gap:8px; }
-  .cols { display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:8px; align-items:start; }
+  main { padding:8px; display:grid; grid-template-columns:1fr 1fr; gap:8px; align-items:start; }
+  .col { display:flex; flex-direction:column; gap:8px; min-width:0; }
+  .cols { display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:8px; align-items:start; }
+  @media (max-width:980px){ main { grid-template-columns:1fr; } }
   .panel { border:1px solid var(--bd); background:var(--panel); }
   .panel > h2 { margin:0; padding:2px 8px; font-size:10px; font-weight:600; color:var(--dim);
     text-transform:uppercase; letter-spacing:1.2px; border-bottom:1px solid var(--bd); }
@@ -83,6 +85,7 @@
   </span>
 </header>
 <main>
+  <div class="col">
   <div class="cols">
     <section class="panel"><h2>training control</h2><div class="b">
       <div class="row">
@@ -139,7 +142,9 @@
     <div class="hint" id="online_status">실제 사이트는 보이는 브라우저 창에서 플레이됩니다. 진행 중인 게임 URL을 붙여넣고 play. (개인 시연·레이트제한·약관 준수)</div>
     <div id="online_board_wrap" style="margin-top:8px"></div>
   </div></section>
+  </div>
 
+  <div class="col">
   <section class="panel"><h2>play sessions</h2><div class="b">
     <div class="row">
       <label class="fld">parallel
@@ -160,6 +165,7 @@
     </div>
   </div></section>
   <div class="boards" id="boards"></div>
+  </div>
 </main>
 <script>
 const $ = (id) => document.getElementById(id);
