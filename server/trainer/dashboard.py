@@ -225,15 +225,21 @@ async def control(request: Request) -> JSONResponse:
 @app.post("/api/config")
 async def config(request: Request) -> JSONResponse:
     assert MANAGER is not None
-    body = await request.json()
-    MANAGER.set_config(
-        lr=body.get("lr"),
-        batch=body.get("batch"),
-        train_freq=body.get("train_freq"),
-        eps_end=body.get("eps_end"),
-    )
     from dataclasses import asdict
 
+    from trainer.manager import LiveConfig
+
+    body = await request.json()
+    if body.get("reset"):  # back to LiveConfig defaults (authoritative source)
+        d = LiveConfig()
+        MANAGER.set_config(lr=d.lr, batch=d.batch, train_freq=d.train_freq, eps_end=d.eps_end)
+    else:
+        MANAGER.set_config(
+            lr=body.get("lr"),
+            batch=body.get("batch"),
+            train_freq=body.get("train_freq"),
+            eps_end=body.get("eps_end"),
+        )
     return JSONResponse(asdict(MANAGER.cfg))
 
 

@@ -122,7 +122,16 @@
         <label class="fld">train every<input type="number" id="train_freq" step="1" min="1" /></label>
         <label class="fld">eps floor<input type="number" id="eps_end" step="0.01" min="0" max="1" /></label>
       </div>
-      <div class="row"><button id="btn_apply">apply (no restart)</button></div>
+      <div class="row">
+        <button id="btn_apply">apply (no restart)</button>
+        <button id="btn_reset_hp">reset defaults</button>
+      </div>
+      <div class="hint">
+        <b>lr</b> 학습률 — 가중치 갱신 보폭(크면 빠르나 불안정). 기본 5e-4<br/>
+        <b>batch</b> 한 번 갱신에 쓰는 표본 수(크면 안정·연산↑). 기본 256<br/>
+        <b>train every</b> 몇 스텝마다 1회 학습(작을수록 자주 갱신). 기본 4<br/>
+        <b>eps floor</b> 탐험(무작위 행동) 확률의 최저값(0=순수 그리디). 기본 0.05
+      </div>
     </div></section>
 
     <section class="panel"><h2>gpu monitor · read-only</h2><div class="b">
@@ -377,6 +386,13 @@ $("btn_start").onclick = () => post("/api/control", {action:"start"});
 $("btn_apply").onclick = () => post("/api/config", {
   lr:parseFloat($("lr").value), batch:parseInt($("batch").value),
   train_freq:parseInt($("train_freq").value), eps_end:parseFloat($("eps_end").value)});
+$("btn_reset_hp").onclick = async () => {
+  try {
+    const r = await fetch("/api/config", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({reset:true})});
+    const cfg = await r.json();
+    $("lr").value=cfg.lr; $("batch").value=cfg.batch; $("train_freq").value=cfg.train_freq; $("eps_end").value=cfg.eps_end;
+  } catch(e){}
+};
 $("parallel").onchange = () => post("/api/play", {parallel:parseInt($("parallel").value)});
 $("difficulty").onchange = () => post("/api/play", {difficulty:$("difficulty").value});
 $("no_guess").onchange = () => post("/api/play", {no_guess:$("no_guess").checked});
