@@ -169,21 +169,33 @@ class OnlinePlayer:
         delay: float = 0.3,
         headless: bool = False,
         profile_dir: str | None = None,
+        cdp_endpoint: str | None = None,
     ):
         self.play_act = play_act  # (state, mask) -> action index
         self.delay = max(0.0, delay)  # seconds between clicks (rate limit)
         self.headless = headless
         self.profile_dir = profile_dir  # persistent Chrome profile → keeps login session
+        # Attach to a user-launched real Chrome over the DevTools protocol. Google blocks
+        # OAuth login in automation browsers, so the user logs in in their own Chrome (no
+        # automation flags) and we connect to it — no subprocess launch, no Google block.
+        self.cdp_endpoint = cdp_endpoint
         # threading.Event (not asyncio): the dashboard runs the player on a dedicated loop
         # in a worker thread, so stop is signalled from a different thread than run()'s loop.
         self._stop = threading.Event()
+        self._owns_browser = True  # False when attached via CDP (never close the user's Chrome)
         self.status = "idle"
 
     def request_stop(self) -> None:
         self._stop.set()
 
     async def _open(self, pw):
-        """Open (closable, page). Persistent context keeps the login session if a dir is set."""
+        """Open (closable, page). CDP attaches to the user's Chrome; else launch our own."""
+        if self.cdp_endpoint:
+            browser = await pw.chromium.connect_over_cdp(self.cdp_endpoint)
+            ctx = browser.contexts[0] if browser.contexts else await browser.new_context()
+            self._owns_browser = False  # leave the user's Chrome running on close
+            return browser, await ctx.new_page()
+        self._owns_browser = True
         if self.profile_dir:
             ctx = await pw.chromium.launch_persistent_context(
                 self.profile_dir, headless=self.headless
@@ -192,6 +204,17 @@ class OnlinePlayer:
             return ctx, page
         browser = await pw.chromium.launch(headless=self.headless)
         return browser, await browser.new_page()
+
+    async def _close(self, closable, page) -> None:
+        """Close what we own. For CDP, close our game tab but leave the user's Chrome open."""
+        try:
+            if self._owns_browser:
+                await closable.close()
+            else:
+                await page.close()  # our game tab only
+                await closable.close()  # disconnect CDP (does not kill the user's Chrome)
+        except Exception:  # noqa: BLE001
+            pass
 
     async def login(self, emit: Callable[[dict], None]) -> None:
         """Open the site so the user logs in once; the persistent profile keeps the session."""
@@ -280,7 +303,7 @@ class OnlinePlayer:
             except Exception as e:  # noqa: BLE001 - surface to the dashboard
                 emit({"type": "online_error", "msg": f"{type(e).__name__}: {e}"})
             finally:
-                await closable.close()
+                await self._close(closable, page)
                 self.status = "stopped"
                 emit({"type": "online_status", "status": self.status, "url": url})
 

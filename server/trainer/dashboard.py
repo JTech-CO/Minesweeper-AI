@@ -44,9 +44,43 @@ PLAY: dict = {"parallel": 2, "difficulty": "beginner", "delay": 0.22}
 MAX_PARALLEL = {"beginner": 18, "intermediate": 8, "expert": 4}
 # Subscribers = per-connection emit callables; the online player broadcasts to all of them.
 _SUBSCRIBERS: set = set()
-ONLINE: dict = {"player": None, "thread": None}
+ONLINE: dict = {"player": None, "thread": None, "chrome": None}
 # Persistent Chrome profile so the online browser stays logged in across runs (gitignored).
 ONLINE_PROFILE_DIR = str(Path(__file__).resolve().parent.parent / "storage" / "online_profile")
+# Real-Chrome (CDP) login: Google blocks OAuth in automation browsers, so the user logs in
+# in their own Chrome (launched with a debug port + a dedicated ASCII profile) and we attach.
+CHROME_DEBUG_PORT = 9222
+CHROME_CDP_ENDPOINT = f"http://127.0.0.1:{CHROME_DEBUG_PORT}"
+CHROME_PROFILE_DIR = str(Path.home() / "msai-online-chrome")
+
+
+def _find_chrome() -> str | None:
+    """Locate the user's real Google Chrome (not Playwright's bundled Chromium)."""
+    import shutil
+
+    cands = [
+        os.path.join(os.environ.get("PROGRAMFILES", r"C:\Program Files"), *_CHROME_REL),
+        os.path.join(os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)"), *_CHROME_REL),
+        os.path.join(os.environ.get("LOCALAPPDATA", ""), *_CHROME_REL),
+    ]
+    for c in cands:
+        if c and os.path.exists(c):
+            return c
+    return shutil.which("chrome") or shutil.which("chrome.exe") or shutil.which("google-chrome")
+
+
+_CHROME_REL = ("Google", "Chrome", "Application", "chrome.exe")
+
+
+def _cdp_reachable() -> bool:
+    """True if a Chrome with the debug port is up and accepting CDP connections."""
+    import urllib.request
+
+    try:
+        with urllib.request.urlopen(f"{CHROME_CDP_ENDPOINT}/json/version", timeout=1.5):
+            return True
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _run_online_player(make_coro, server_loop: asyncio.AbstractEventLoop) -> None:
@@ -248,6 +282,28 @@ async def online_ctl(request: Request) -> JSONResponse:
             task.add_done_callback(_surface)
             ONLINE["thread"] = task
 
+    if action == "open_chrome":
+        # Launch the user's real Chrome with a debug port so they can log in normally
+        # (Google allows it — no automation flags) and we attach to it via CDP for play.
+        chrome = _find_chrome()
+        if not chrome:
+            return JSONResponse({"error": "Google Chrome not found"}, status_code=400)
+        proc = ONLINE.get("chrome")
+        if proc is None or proc.poll() is not None:
+            import subprocess
+
+            ONLINE["chrome"] = subprocess.Popen(  # noqa: S603 - fixed args, local launch
+                [
+                    chrome,
+                    f"--remote-debugging-port={CHROME_DEBUG_PORT}",
+                    f"--user-data-dir={CHROME_PROFILE_DIR}",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    "https://minesweeper.online/",
+                ]
+            )
+        broadcast({"type": "online_status", "status": "chrome", "url": CHROME_CDP_ENDPOINT})
+        return JSONResponse({"status": "chrome_open", "endpoint": CHROME_CDP_ENDPOINT})
     if action == "login":
         if ONLINE["player"] is not None:
             ONLINE["player"].request_stop()
@@ -262,10 +318,17 @@ async def online_ctl(request: Request) -> JSONResponse:
         if ONLINE["player"] is not None:
             ONLINE["player"].request_stop()
         delay = max(0.0, min(2.0, float(body.get("delay", 0.3))))
-        player = OnlinePlayer(MANAGER.play_act, delay=delay, profile_dir=ONLINE_PROFILE_DIR)
+        # Prefer attaching to the user's logged-in Chrome (CDP); else our own browser.
+        cdp = CHROME_CDP_ENDPOINT if _cdp_reachable() else None
+        player = OnlinePlayer(
+            MANAGER.play_act,
+            delay=delay,
+            profile_dir=None if cdp else ONLINE_PROFILE_DIR,
+            cdp_endpoint=cdp,
+        )
         ONLINE["player"] = player
         _spawn(lambda emit: player.run(url, emit))
-        return JSONResponse({"status": "starting", "url": url, "delay": delay})
+        return JSONResponse({"status": "starting", "url": url, "delay": delay, "cdp": bool(cdp)})
     if action == "stop" and ONLINE["player"] is not None:
         ONLINE["player"].request_stop()
         return JSONResponse({"status": "stopping"})
