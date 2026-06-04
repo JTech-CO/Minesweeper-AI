@@ -19,6 +19,7 @@ import asyncio
 import csv
 import random
 import re
+import socket
 import threading
 import time
 import webbrowser
@@ -220,6 +221,22 @@ def parse_args() -> argparse.Namespace:
     return p.parse_args()
 
 
+def _open_browser_when_ready(host: str, port: int, url: str) -> None:
+    """Wait until the server is actually accepting connections, THEN open the browser.
+    Avoids the race where a fixed-delay open fires before uvicorn has bound the port."""
+    for _ in range(60):  # up to ~15s
+        try:
+            with socket.create_connection((host, port), timeout=0.5):
+                break
+        except OSError:
+            time.sleep(0.25)
+    print(f"[dashboard] ready  →  open {url}", flush=True)
+    try:
+        webbrowser.open(url)
+    except Exception:  # noqa: BLE001 - opening a browser is best-effort
+        print("[dashboard] (auto-open failed; open the URL above manually)", flush=True)
+
+
 def main() -> None:
     global CFG
     args = parse_args()
@@ -233,11 +250,18 @@ def main() -> None:
         end_delay=args.end_delay,
         device=args.device,
     )
-    url = f"http://127.0.0.1:{args.port}"
-    print(f"[dashboard] {url}  ckpt={CFG.ckpt_path.name} device={CFG.device}", flush=True)
+    host = "127.0.0.1"
+    url = f"http://{host}:{args.port}"
+    print(
+        f"[dashboard] starting on {url}  (ckpt={CFG.ckpt_path.name}, device={CFG.device})",
+        flush=True,
+    )
+    print("[dashboard] keep this window open; press Ctrl+C to stop.", flush=True)
     if not args.no_open:
-        threading.Timer(1.2, lambda: webbrowser.open(url)).start()
-    uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")
+        threading.Thread(
+            target=_open_browser_when_ready, args=(host, args.port, url), daemon=True
+        ).start()
+    uvicorn.run(app, host=host, port=args.port, log_level="warning")
 
 
 if __name__ == "__main__":
