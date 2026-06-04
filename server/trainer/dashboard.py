@@ -20,6 +20,7 @@ import os
 import random
 import re
 import socket
+import sys
 import threading
 import time
 import webbrowser
@@ -43,7 +44,33 @@ PLAY: dict = {"parallel": 2, "difficulty": "beginner", "delay": 0.22}
 MAX_PARALLEL = {"beginner": 18, "intermediate": 8, "expert": 4}
 # Subscribers = per-connection emit callables; the online player broadcasts to all of them.
 _SUBSCRIBERS: set = set()
-ONLINE: dict = {"player": None, "task": None}
+ONLINE: dict = {"player": None, "thread": None}
+
+
+def _run_online_player(player, url: str, server_loop: asyncio.AbstractEventLoop) -> None:
+    """Drive Playwright on a dedicated subprocess-capable loop in this worker thread.
+
+    uvicorn's reload worker runs on a Windows SelectorEventLoop, which cannot spawn the
+    Playwright driver subprocess (NotImplementedError). We give the player its own
+    ProactorEventLoop here and marshal every emit back to the server loop (which owns the
+    WebSocket queues) via call_soon_threadsafe. Any failure surfaces as online_error.
+    """
+
+    def threadsafe_emit(frame: dict) -> None:
+        server_loop.call_soon_threadsafe(broadcast, frame)
+
+    if sys.platform == "win32":
+        loop = asyncio.ProactorEventLoop()
+    else:
+        loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        loop.run_until_complete(player.run(url, threadsafe_emit))
+    except Exception as e:  # noqa: BLE001 - never let a launch error vanish silently
+        threadsafe_emit({"type": "online_error", "msg": f"{type(e).__name__}: {e}"})
+        threadsafe_emit({"type": "online_status", "status": "stopped", "url": url})
+    finally:
+        loop.close()
 
 
 @asynccontextmanager
@@ -199,7 +226,12 @@ async def online_ctl(request: Request) -> JSONResponse:
 
         player = OnlinePlayer(MANAGER.play_act, delay=float(body.get("delay", 0.5)))
         ONLINE["player"] = player
-        ONLINE["task"] = asyncio.create_task(player.run(url, broadcast))
+        server_loop = asyncio.get_running_loop()
+        thread = threading.Thread(
+            target=_run_online_player, args=(player, url, server_loop), daemon=True
+        )
+        ONLINE["thread"] = thread
+        thread.start()
         return JSONResponse({"status": "starting", "url": url})
     if action == "stop" and ONLINE["player"] is not None:
         ONLINE["player"].request_stop()

@@ -13,6 +13,7 @@ the live site via trainer/_inspect on first build.
 from __future__ import annotations
 
 import asyncio
+import threading
 from collections.abc import Callable
 
 import numpy as np
@@ -142,7 +143,9 @@ class OnlinePlayer:
         self.play_act = play_act  # (state, mask) -> action index
         self.delay = delay
         self.headless = headless
-        self._stop = asyncio.Event()
+        # threading.Event (not asyncio): the dashboard runs the player on a dedicated loop
+        # in a worker thread, so stop is signalled from a different thread than run()'s loop.
+        self._stop = threading.Event()
         self.status = "idle"
 
     def request_stop(self) -> None:
