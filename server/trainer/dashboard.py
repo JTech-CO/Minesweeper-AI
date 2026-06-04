@@ -254,7 +254,9 @@ def _open_browser_when_ready(host: str, port: int, url: str) -> None:
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser()
     p.add_argument("--dir", default="storage/checkpoints")
-    p.add_argument("--bootstrap-tag", default="beginner", help="run to resume weights/count from")
+    p.add_argument(
+        "--bootstrap-tag", "--tag", default="beginner", help="run to resume weights/count from"
+    )
     p.add_argument("--difficulty", choices=list(DIFFICULTIES), default="beginner")
     p.add_argument("--port", type=int, default=8800)
     p.add_argument("--device", default="cuda")
