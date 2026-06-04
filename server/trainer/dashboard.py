@@ -39,6 +39,8 @@ _HTML = Path(__file__).parent / "dashboard.html"
 
 MANAGER: TrainingManager | None = None
 PLAY: dict = {"parallel": 2, "difficulty": "beginner", "delay": 0.22}
+# Boards grow with difficulty (fixed cell size), so fewer fit on screen → cap per difficulty.
+MAX_PARALLEL = {"beginner": 18, "intermediate": 8, "expert": 4}
 # Subscribers = per-connection emit callables; the online player broadcasts to all of them.
 _SUBSCRIBERS: set = set()
 ONLINE: dict = {"player": None, "task": None}
@@ -128,7 +130,14 @@ def index() -> str:
 @app.get("/api/status")
 def status() -> JSONResponse:
     assert MANAGER is not None
-    return JSONResponse({**MANAGER.snapshot(), "play": PLAY, "difficulties": list(DIFFICULTIES)})
+    return JSONResponse(
+        {
+            **MANAGER.snapshot(),
+            "play": PLAY,
+            "difficulties": list(DIFFICULTIES),
+            "max_parallel": MAX_PARALLEL,
+        }
+    )
 
 
 @app.post("/api/control")
@@ -165,11 +174,13 @@ async def config(request: Request) -> JSONResponse:
 @app.post("/api/play")
 async def set_play(request: Request) -> JSONResponse:
     body = await request.json()
-    if "parallel" in body:
-        PLAY["parallel"] = max(1, min(18, int(body["parallel"])))
     if "difficulty" in body and body["difficulty"] in DIFFICULTIES:
         PLAY["difficulty"] = body["difficulty"]
-    return JSONResponse(PLAY)
+    if "parallel" in body:
+        PLAY["parallel"] = int(body["parallel"])
+    cap = MAX_PARALLEL[PLAY["difficulty"]]
+    PLAY["parallel"] = max(1, min(cap, PLAY["parallel"]))
+    return JSONResponse({**PLAY, "max_parallel": cap})
 
 
 @app.post("/api/online")
@@ -257,7 +268,14 @@ async def ws(websocket: WebSocket) -> None:
 
     async def status_task() -> None:
         while True:
-            emit({"type": "status", **MANAGER.snapshot(), "play": PLAY})
+            emit(
+                {
+                    "type": "status",
+                    **MANAGER.snapshot(),
+                    "play": PLAY,
+                    "max_parallel": MAX_PARALLEL,
+                }
+            )
             await asyncio.sleep(1.0)
 
     async def supervisor() -> None:
