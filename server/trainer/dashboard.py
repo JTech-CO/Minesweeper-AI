@@ -34,12 +34,13 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from trainer.encoding import encode
 from trainer.env import DIFFICULTIES, MinesweeperEnv
 from trainer.manager import TrainingManager
+from trainer.solver import analyze, generate_no_guess_board, view_from_arrays
 
 _EP_RE = re.compile(r"ep\s+(\d+)\s+step")
 _HTML = Path(__file__).parent / "dashboard.html"
 
 MANAGER: TrainingManager | None = None
-PLAY: dict = {"parallel": 2, "difficulty": "beginner", "delay": 0.22}
+PLAY: dict = {"parallel": 2, "difficulty": "beginner", "delay": 0.22, "no_guess": False}
 # Boards grow with difficulty (fixed cell size), so fewer fit on screen → cap per difficulty.
 MAX_PARALLEL = {"beginner": 18, "intermediate": 8, "expert": 4}
 # Subscribers = per-connection emit callables; the online player broadcasts to all of them.
@@ -243,6 +244,8 @@ async def set_play(request: Request) -> JSONResponse:
         PLAY["difficulty"] = body["difficulty"]
     if "parallel" in body:
         PLAY["parallel"] = int(body["parallel"])
+    if "no_guess" in body:
+        PLAY["no_guess"] = bool(body["no_guess"])
     cap = MAX_PARALLEL[PLAY["difficulty"]]
     PLAY["parallel"] = max(1, min(cap, PLAY["parallel"]))
     return JSONResponse({**PLAY, "max_parallel": cap})
@@ -350,11 +353,22 @@ async def ws(websocket: WebSocket) -> None:
     _SUBSCRIBERS.add(emit)  # receive online-play broadcasts too
 
     async def board_task(slot: int) -> None:
+        loop = asyncio.get_running_loop()
         while True:
             diff = PLAY["difficulty"]
             r, c, m = DIFFICULTIES[diff]
-            env = MinesweeperEnv(r, c, m, seed=random.randrange(2**31))
-            env.reset()
+            ng = PLAY["no_guess"]
+            if ng:
+                # Reject-sample a no-guess board (solver clears it ~100%). CPU-bound, so run
+                # it off the event loop. Falls back to a random board if none is found.
+                seed = random.randrange(2**31)
+                env = await loop.run_in_executor(None, generate_no_guess_board, r, c, m, seed)
+                if env is None:
+                    env = MinesweeperEnv(r, c, m, seed=random.randrange(2**31))
+                    env.reset()
+            else:
+                env = MinesweeperEnv(r, c, m, seed=random.randrange(2**31))
+                env.reset()
             emit(
                 {
                     "type": "board_start",
@@ -363,26 +377,41 @@ async def ws(websocket: WebSocket) -> None:
                     "cols": c,
                     "mines": m,
                     "difficulty": diff,
+                    "ng": ng,
                 }
             )
             start = time.monotonic()
             move = 0
             while env.status in ("ready", "playing"):
-                action = MANAGER.hybrid_act(encode(env), env.legal_action_mask())
-                env.step(action)
-                move += 1
-                emit(
-                    {
-                        "type": "board",
-                        "slot": slot,
-                        "cells": serialize_board(env),
-                        "last": int(action),
-                        "move": move,
-                        "status": env.status,
-                        "elapsedMs": round((time.monotonic() - start) * 1000, 1),
-                    }
-                )
-                await asyncio.sleep(PLAY["delay"])
+                # NG: reveal EVERY certain-safe cell each round (matches the no-guess
+                # validator → clears ~100%). Otherwise the per-move hybrid (one action).
+                if ng:
+                    view = view_from_arrays(
+                        env.rows, env.cols, env.mines, env.revealed, env.adjacent, env.flagged
+                    )
+                    safe, _ = analyze(view)
+                    batch = [s for s in safe if not env.revealed[s]] or [
+                        MANAGER.hybrid_act(encode(env), env.legal_action_mask())
+                    ]
+                else:
+                    batch = [MANAGER.hybrid_act(encode(env), env.legal_action_mask())]
+                for action in batch:
+                    if env.status not in ("ready", "playing") or env.revealed[action]:
+                        continue
+                    env.step(action)
+                    move += 1
+                    emit(
+                        {
+                            "type": "board",
+                            "slot": slot,
+                            "cells": serialize_board(env),
+                            "last": int(action),
+                            "move": move,
+                            "status": env.status,
+                            "elapsedMs": round((time.monotonic() - start) * 1000, 1),
+                        }
+                    )
+                    await asyncio.sleep(PLAY["delay"])
             emit(
                 {
                     "type": "board_result",

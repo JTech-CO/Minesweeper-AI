@@ -451,6 +451,53 @@ def solve_step(view: SolverView) -> dict:
     }
 
 
+def _solver_clears_env(env) -> bool:
+    """Solver-only playthrough from env's current state; True if cleared without guessing."""
+    while env.status in ("ready", "playing"):
+        view = view_from_arrays(
+            env.rows, env.cols, env.mines, env.revealed, env.adjacent, env.flagged
+        )
+        safe, _ = analyze(view)
+        if not safe:
+            return False
+        for s in safe:
+            if env.status not in ("ready", "playing") or env.revealed[s]:
+                continue
+            env.step(s)
+    return env.status == "won"
+
+
+def generate_no_guess_board(
+    rows: int,
+    cols: int,
+    mines: int,
+    seed_base: int,
+    *,
+    first_click: int | None = None,
+    max_attempts: int = 800,
+):
+    """Reject-sample a board the solver can clear with NO guessing (an "NG" board).
+
+    Returns a started MinesweeperEnv (first click revealed, status 'playing') ready to play,
+    or None if none was found within max_attempts. The NG property is tied to the first
+    click (mines are placed safe-area around it), so the caller must continue from this env.
+    """
+    from trainer.env import MinesweeperEnv
+
+    fc = first_click if first_click is not None else (rows // 2) * cols + (cols // 2)
+    for a in range(max_attempts):
+        seed = seed_base + a
+        chk = MinesweeperEnv(rows, cols, mines, seed=seed, first_click_policy="safe-area")
+        chk.reset()
+        chk.step(fc)
+        if _solver_clears_env(chk):  # deterministic by (seed, fc) → rebuild a fresh start state
+            play = MinesweeperEnv(rows, cols, mines, seed=seed, first_click_policy="safe-area")
+            play.reset()
+            play.step(fc)
+            return play
+    return None
+
+
 def view_from_arrays(
     rows: int,
     cols: int,

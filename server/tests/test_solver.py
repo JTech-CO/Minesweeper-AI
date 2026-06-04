@@ -8,7 +8,7 @@ positive fails the suite (CLAUDE.md §5). Also reports the no-guess logic-solve 
 from __future__ import annotations
 
 from trainer.env import MinesweeperEnv
-from trainer.solver import analyze, view_from_arrays
+from trainer.solver import analyze, generate_no_guess_board, view_from_arrays
 
 
 def _view(env: MinesweeperEnv):
@@ -74,6 +74,24 @@ def test_single_point_safe_neighbors():
         assert env.mine_layout[s] == 0
     for m in mines:
         assert env.mine_layout[m] == 1
+
+
+def test_no_guess_generation_clears_without_guessing():
+    """An NG board always has a certain-safe cell each round → batch reveal clears it."""
+    for r, c, m in [(9, 9, 10), (16, 16, 40)]:
+        env = generate_no_guess_board(r, c, m, seed_base=50_000)
+        assert env is not None, f"no NG board found for {r}x{c}/{m}"
+        guard = 0
+        while env.status in ("ready", "playing") and guard < env.n + 5:
+            guard += 1
+            safe, _ = analyze(_view(env))
+            assert safe, "an NG board must always expose a certain-safe cell"
+            for s in safe:
+                if env.status in ("ready", "playing") and not env.revealed[s]:
+                    if env.mine_layout[s] != 0:
+                        raise AssertionError("solver claimed a mine as safe")
+                    env.step(s)
+        assert env.status == "won"
 
 
 if __name__ == "__main__":

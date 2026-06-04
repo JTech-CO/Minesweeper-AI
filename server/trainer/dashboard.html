@@ -181,7 +181,11 @@
           <option value="expert">expert 30x16 / 99</option>
         </select>
       </label>
+      <label class="fld" style="flex-direction:row; align-items:center; gap:5px">
+        <input type="checkbox" id="no_guess" /> NG (no-guess)
+      </label>
     </div>
+    <div class="hint">NG = 추측 없이 풀리는 보드만 생성 → 솔버가 ~100% 클리어(일관 시연). 끄면 랜덤 보드(표준 승률).</div>
   </div></section>
   <div class="boards" id="boards"></div>
   </div>
@@ -360,6 +364,7 @@ function applyStatus(s){
     syncParallelOptions(maxN);
     if (document.activeElement !== $("parallel")) $("parallel").value = s.play.parallel;
     if (document.activeElement !== $("difficulty")) $("difficulty").value = s.play.difficulty;
+    if (document.activeElement !== $("no_guess")) $("no_guess").checked = !!s.play.no_guess;
     pruneBoards(s.play.parallel);
   }
   drawChart(s.metrics || []);
@@ -374,6 +379,7 @@ $("btn_apply").onclick = () => post("/api/config", {
   train_freq:parseInt($("train_freq").value), eps_end:parseFloat($("eps_end").value)});
 $("parallel").onchange = () => post("/api/play", {parallel:parseInt($("parallel").value)});
 $("difficulty").onchange = () => post("/api/play", {difficulty:$("difficulty").value});
+$("no_guess").onchange = () => post("/api/play", {no_guess:$("no_guess").checked});
 $("online_chrome").onclick = () => {
   $("online_status").textContent = "실제 Chrome을 여는 중… 열린 창에서 로그인하세요.";
   post("/api/online", {action:"open_chrome"});
