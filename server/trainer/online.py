@@ -7,7 +7,8 @@ games to public/ranked leaderboards; respect the site's terms of service.
 
 DOM contract (minesweeper.online) is isolated in `DOM` + the JS snippets below, so it can
 be corrected from DevTools without touching the play logic (run-book 10). Verified against
-the live site via trainer/_inspect on first build.
+the live site (a real /start/1 game) on 2026-06-05: cells are 0-indexed and the board is
+drawn ~2s after DOMContentLoaded, so run() waits for the cells before reading.
 """
 
 from __future__ import annotations
@@ -21,7 +22,8 @@ import numpy as np
 from trainer.encoding import NUM_CHANNELS, encode
 
 # --- DOM contract (minesweeper.online) -----------------------------------------------------
-# Cells are <div id="cell_{col}_{row}"> (1-indexed) whose class encodes state:
+# Cells are <div id="cell_{col}_{row}"> (0-indexed: cell_0_0 .. cell_{cols-1}_{rows-1}),
+# class "cell size24 ...", whose state class is:
 #   hd_closed | hd_flag | hd_opened + hd_type{0..8} | hd_type1{0,1,2}=mine/exploded/wrong
 JS_READ_BOARD = r"""
 () => {
@@ -71,7 +73,7 @@ JS_FACE = r"""
 }
 """
 
-DOM = {"cell_id": "cell_{col}_{row}"}  # 1-indexed col,row
+DOM = {"cell_id": "cell_{col}_{row}"}  # 0-indexed col,row (verified live)
 
 _ERR_NO_PW = "playwright not installed; run: playwright install chromium"
 _ERR_NO_BOARD = "no board at this URL (check the game URL / DOM contract)"
@@ -97,8 +99,18 @@ def _estimate_mines(rows: int, cols: int) -> int:
 
 
 def parse_board(raw: dict) -> dict:
-    """Convert the JS-extracted board into revealed/adjacent/flag arrays + dims."""
-    rows, cols = raw["rows"], raw["cols"]
+    """Convert the JS-extracted board into revealed/adjacent/flag arrays + dims.
+
+    minesweeper.online uses 0-indexed cell ids (cell_0_0 .. cell_{cols-1}_{rows-1}). We
+    derive dims and a base offset from the actual min/max coordinates so the mapping is
+    correct regardless of whether the site is 0- or 1-indexed (verified 0-indexed live).
+    """
+    cells = raw["cells"]
+    cs = [cell["c"] for cell in cells]
+    rs = [cell["r"] for cell in cells]
+    col0, row0 = min(cs), min(rs)
+    cols = max(cs) - col0 + 1
+    rows = max(rs) - row0 + 1
     n = rows * cols
     revealed = np.zeros(n, dtype=np.uint8)
     flagged = np.zeros(n, dtype=np.uint8)
@@ -106,8 +118,8 @@ def parse_board(raw: dict) -> dict:
     cell_codes = np.full(
         n, -1, dtype=np.int8
     )  # for rendering: -1 hidden,0..8,-2 mine,-3 exploded,-4 flag
-    for cell in raw["cells"]:
-        i = (cell["r"] - 1) * cols + (cell["c"] - 1)
+    for cell in cells:
+        i = (cell["r"] - row0) * cols + (cell["c"] - col0)
         if not (0 <= i < n):
             continue
         st = cell["state"]
@@ -128,6 +140,8 @@ def parse_board(raw: dict) -> dict:
     return {
         "rows": rows,
         "cols": cols,
+        "col0": col0,
+        "row0": row0,
         "mines": mines,
         "revealed": revealed,
         "flagged": flagged,
@@ -165,7 +179,14 @@ class OnlinePlayer:
             page = await browser.new_page()
             try:
                 await page.goto(url, wait_until="domcontentloaded", timeout=30000)
-                await asyncio.sleep(1.0)
+                # The board is drawn by JS a beat after DOMContentLoaded (~2s observed),
+                # so wait for the cells to actually exist before reading — otherwise we'd
+                # see an empty board and bail immediately, closing the window mid-load.
+                try:
+                    await page.wait_for_selector('[id^="cell_"]', timeout=20000)
+                    await asyncio.sleep(0.4)  # let the full grid finish painting
+                except Exception:  # noqa: BLE001 - fall through; no-board check reports it
+                    pass
                 self.status = "playing"
                 move = 0
                 while not self._stop.is_set():
@@ -198,8 +219,12 @@ class OnlinePlayer:
                             "mines": board["mines"],
                         }
                     )
-                    if face in ("won", "lost"):
-                        emit({"type": "online_result", "won": face == "won", "moves": move})
+                    # A revealed mine/explosion is a definitive loss even if the face DOM
+                    # contract drifts — stops the model from clicking a dead board forever.
+                    exploded = -3 in board["cell_codes"] or -2 in board["cell_codes"]
+                    if face in ("won", "lost") or exploded:
+                        won = face == "won" and not exploded
+                        emit({"type": "online_result", "won": won, "moves": move})
                         break
 
                     # choose a hidden cell with the model
@@ -215,7 +240,8 @@ class OnlinePlayer:
                     if state.shape[0] != NUM_CHANNELS:
                         break
                     action = self.play_act(state, mask)
-                    c, r = (action % cols) + 1, (action // cols) + 1
+                    c = board["col0"] + (action % cols)
+                    r = board["row0"] + (action // cols)
                     await page.click(f"#cell_{c}_{r}", timeout=5000)
                     move += 1
                     await asyncio.sleep(self.delay)  # rate limit (human-like)
