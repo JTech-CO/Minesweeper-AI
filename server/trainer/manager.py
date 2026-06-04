@@ -27,6 +27,7 @@ from trainer.env import DIFFICULTIES, MinesweeperEnv
 from trainer.evaluate import evaluate
 from trainer.model import QNet
 from trainer.replay import PrioritizedReplay
+from trainer.solver import solve_step, view_from_encoding
 
 
 @dataclass
@@ -281,6 +282,31 @@ class TrainingManager:
         mask_t = torch.from_numpy(mask.astype(np.bool_))
         q = torch.where(mask_t, q, torch.full_like(q, MASK_VALUE))
         return int(torch.argmax(q).item())
+
+    def hybrid_act(self, state: np.ndarray, mask: np.ndarray) -> int:
+        """Solver-first play: take a CERTAIN-safe cell; else the lowest-mine-probability
+        guess (exact CSP); the policy net is only a last resort. Decouples play win-rate
+        from the still-training model — the solver clears most boards on its own."""
+        legal = np.flatnonzero(mask)
+        if legal.size == 0:
+            return 0
+        legal_set = {int(x) for x in legal}
+        try:
+            step = solve_step(view_from_encoding(state))
+        except Exception:  # noqa: BLE001 - any solver hiccup → fall back to the model
+            return self.play_act(state, mask)
+        safe_legal = [s for s in step["safe"] if s in legal_set]
+        if safe_legal:
+            return int(safe_legal[0])
+        mines = set(step["mines"])
+        guess = step["guess"]
+        if guess is not None and guess["cell"] in legal_set and guess["cell"] not in mines:
+            return int(guess["cell"])
+        probs = step["probabilities"] or {}
+        candidates = [int(c) for c in legal if int(c) not in mines] or [int(c) for c in legal]
+        if probs:
+            return int(min(candidates, key=lambda c: probs.get(c, 1.0)))
+        return self.play_act(state, mask)
 
     # -- training loop --------------------------------------------------------
 

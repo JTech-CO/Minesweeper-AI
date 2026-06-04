@@ -321,7 +321,7 @@ async def online_ctl(request: Request) -> JSONResponse:
         # Prefer attaching to the user's logged-in Chrome (CDP); else our own browser.
         cdp = CHROME_CDP_ENDPOINT if _cdp_reachable() else None
         player = OnlinePlayer(
-            MANAGER.play_act,
+            MANAGER.hybrid_act,
             delay=delay,
             profile_dir=None if cdp else ONLINE_PROFILE_DIR,
             cdp_endpoint=cdp,
@@ -368,7 +368,7 @@ async def ws(websocket: WebSocket) -> None:
             start = time.monotonic()
             move = 0
             while env.status in ("ready", "playing"):
-                action = MANAGER.play_act(encode(env), env.legal_action_mask())
+                action = MANAGER.hybrid_act(encode(env), env.legal_action_mask())
                 env.step(action)
                 move += 1
                 emit(
