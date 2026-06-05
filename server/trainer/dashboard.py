@@ -20,7 +20,6 @@ import os
 import random
 import re
 import socket
-import sys
 import threading
 import time
 import webbrowser
@@ -43,73 +42,6 @@ MANAGER: TrainingManager | None = None
 PLAY: dict = {"parallel": 2, "difficulty": "beginner", "delay": 0.22, "no_guess": False}
 # Boards grow with difficulty (fixed cell size), so fewer fit on screen → cap per difficulty.
 MAX_PARALLEL = {"beginner": 18, "intermediate": 8, "expert": 4}
-# Subscribers = per-connection emit callables; the online player broadcasts to all of them.
-_SUBSCRIBERS: set = set()
-ONLINE: dict = {"player": None, "thread": None, "chrome": None}
-# Persistent Chrome profile so the online browser stays logged in across runs (gitignored).
-ONLINE_PROFILE_DIR = str(Path(__file__).resolve().parent.parent / "storage" / "online_profile")
-# Real-Chrome (CDP) login: Google blocks OAuth in automation browsers, so the user logs in
-# in their own Chrome (launched with a debug port + a dedicated ASCII profile) and we attach.
-CHROME_DEBUG_PORT = 9222
-CHROME_CDP_ENDPOINT = f"http://127.0.0.1:{CHROME_DEBUG_PORT}"
-CHROME_PROFILE_DIR = str(Path.home() / "msai-online-chrome")
-
-
-def _find_chrome() -> str | None:
-    """Locate the user's real Google Chrome (not Playwright's bundled Chromium)."""
-    import shutil
-
-    cands = [
-        os.path.join(os.environ.get("PROGRAMFILES", r"C:\Program Files"), *_CHROME_REL),
-        os.path.join(os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)"), *_CHROME_REL),
-        os.path.join(os.environ.get("LOCALAPPDATA", ""), *_CHROME_REL),
-    ]
-    for c in cands:
-        if c and os.path.exists(c):
-            return c
-    return shutil.which("chrome") or shutil.which("chrome.exe") or shutil.which("google-chrome")
-
-
-_CHROME_REL = ("Google", "Chrome", "Application", "chrome.exe")
-
-
-def _cdp_reachable() -> bool:
-    """True if a Chrome with the debug port is up and accepting CDP connections."""
-    import urllib.request
-
-    try:
-        with urllib.request.urlopen(f"{CHROME_CDP_ENDPOINT}/json/version", timeout=1.5):
-            return True
-    except Exception:  # noqa: BLE001
-        return False
-
-
-def _run_online_player(make_coro, server_loop: asyncio.AbstractEventLoop) -> None:
-    """Drive Playwright on a dedicated subprocess-capable loop in this worker thread.
-
-    uvicorn's reload worker runs on a Windows SelectorEventLoop, which cannot spawn the
-    Playwright driver subprocess (NotImplementedError). We give the player its own
-    ProactorEventLoop here and marshal every emit back to the server loop (which owns the
-    WebSocket queues) via call_soon_threadsafe. Any failure surfaces as online_error.
-
-    make_coro(emit) returns the coroutine to run (player.run or player.login).
-    """
-
-    def threadsafe_emit(frame: dict) -> None:
-        server_loop.call_soon_threadsafe(broadcast, frame)
-
-    if sys.platform == "win32":
-        loop = asyncio.ProactorEventLoop()
-    else:
-        loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    try:
-        loop.run_until_complete(make_coro(threadsafe_emit))
-    except Exception as e:  # noqa: BLE001 - never let a launch error vanish silently
-        threadsafe_emit({"type": "online_error", "msg": f"{type(e).__name__}: {e}"})
-        threadsafe_emit({"type": "online_status", "status": "stopped", "url": ""})
-    finally:
-        loop.close()
 
 
 @asynccontextmanager
@@ -140,14 +72,6 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="Minesweeper AI — Management", lifespan=lifespan)
-
-
-def broadcast(frame: dict) -> None:
-    for emit in list(_SUBSCRIBERS):
-        try:
-            emit(frame)
-        except Exception:  # noqa: BLE001 - one slow client must not break others
-            pass
 
 
 def _read_latest_episode(log_path: Path, csv_path: Path) -> int:
@@ -257,93 +181,6 @@ async def set_play(request: Request) -> JSONResponse:
     return JSONResponse({**PLAY, "max_parallel": cap})
 
 
-@app.post("/api/online")
-async def online_ctl(request: Request) -> JSONResponse:
-    """Start/stop playing a real minesweeper.online game (personal demo; rate-limited)."""
-    assert MANAGER is not None
-    body = await request.json()
-    action = body.get("action")
-    from trainer.online import OnlinePlayer
-
-    def _spawn(make_coro) -> None:
-        # Playwright needs a subprocess-capable loop. On Windows the uvicorn reload worker
-        # runs a SelectorEventLoop (can't spawn the driver) — there we hand the player its
-        # own ProactorEventLoop in a worker thread. But we must NOT create a 2nd Proactor
-        # loop alongside a Proactor main loop (it breaks Playwright's pipe → the browser
-        # hands off and exits), so when the main loop already supports subprocesses
-        # (Proactor on Windows, or any loop on Unix) we run the player directly on it.
-        server_loop = asyncio.get_running_loop()
-        if sys.platform == "win32" and not isinstance(server_loop, asyncio.ProactorEventLoop):
-            thread = threading.Thread(
-                target=_run_online_player, args=(make_coro, server_loop), daemon=True
-            )
-            ONLINE["thread"] = thread
-            thread.start()
-        else:
-            task = asyncio.create_task(make_coro(broadcast))
-
-            def _surface(t: asyncio.Task) -> None:  # never let a launch error vanish
-                exc = None if t.cancelled() else t.exception()
-                if exc is not None:
-                    broadcast({"type": "online_error", "msg": f"{type(exc).__name__}: {exc}"})
-                    broadcast({"type": "online_status", "status": "stopped", "url": ""})
-
-            task.add_done_callback(_surface)
-            ONLINE["thread"] = task
-
-    if action == "open_chrome":
-        # Launch the user's real Chrome with a debug port so they can log in normally
-        # (Google allows it — no automation flags) and we attach to it via CDP for play.
-        chrome = _find_chrome()
-        if not chrome:
-            return JSONResponse({"error": "Google Chrome not found"}, status_code=400)
-        proc = ONLINE.get("chrome")
-        if proc is None or proc.poll() is not None:
-            import subprocess
-
-            ONLINE["chrome"] = subprocess.Popen(  # noqa: S603 - fixed args, local launch
-                [
-                    chrome,
-                    f"--remote-debugging-port={CHROME_DEBUG_PORT}",
-                    f"--user-data-dir={CHROME_PROFILE_DIR}",
-                    "--no-first-run",
-                    "--no-default-browser-check",
-                    "https://minesweeper.online/",
-                ]
-            )
-        broadcast({"type": "online_status", "status": "chrome", "url": CHROME_CDP_ENDPOINT})
-        return JSONResponse({"status": "chrome_open", "endpoint": CHROME_CDP_ENDPOINT})
-    if action == "login":
-        if ONLINE["player"] is not None:
-            ONLINE["player"].request_stop()
-        player = OnlinePlayer(MANAGER.play_act, profile_dir=ONLINE_PROFILE_DIR)
-        ONLINE["player"] = player
-        _spawn(lambda emit: player.login(emit))
-        return JSONResponse({"status": "login"})
-    if action == "start":
-        url = (body.get("url") or "").strip()
-        if not url.startswith("http"):
-            return JSONResponse({"error": "provide a full https game URL"}, status_code=400)
-        if ONLINE["player"] is not None:
-            ONLINE["player"].request_stop()
-        delay = max(0.0, min(2.0, float(body.get("delay", 0.3))))
-        # Prefer attaching to the user's logged-in Chrome (CDP); else our own browser.
-        cdp = CHROME_CDP_ENDPOINT if _cdp_reachable() else None
-        player = OnlinePlayer(
-            MANAGER.hybrid_act,
-            delay=delay,
-            profile_dir=None if cdp else ONLINE_PROFILE_DIR,
-            cdp_endpoint=cdp,
-        )
-        ONLINE["player"] = player
-        _spawn(lambda emit: player.run(url, emit))
-        return JSONResponse({"status": "starting", "url": url, "delay": delay, "cdp": bool(cdp)})
-    if action == "stop" and ONLINE["player"] is not None:
-        ONLINE["player"].request_stop()
-        return JSONResponse({"status": "stopping"})
-    return JSONResponse({"status": ONLINE["player"].status if ONLINE["player"] else "idle"})
-
-
 @app.websocket("/ws")
 async def ws(websocket: WebSocket) -> None:
     assert MANAGER is not None
@@ -355,8 +192,6 @@ async def ws(websocket: WebSocket) -> None:
             queue.put_nowait(msg)
         except asyncio.QueueFull:
             pass  # drop frames if the client is slow
-
-    _SUBSCRIBERS.add(emit)  # receive online-play broadcasts too
 
     async def board_task(slot: int) -> None:
         loop = asyncio.get_running_loop()
@@ -481,7 +316,6 @@ async def ws(websocket: WebSocket) -> None:
     except WebSocketDisconnect:
         pass
     finally:
-        _SUBSCRIBERS.discard(emit)
         for t in tasks:
             t.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
