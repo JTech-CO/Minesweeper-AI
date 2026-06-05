@@ -59,6 +59,11 @@
   canvas { width:100%; height:120px; display:block; }
   .charts { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:8px; }
   .chart-lbl { font-size:10px; font-weight:700; letter-spacing:.5px; display:block; margin-bottom:1px; }
+  .winstats { display:grid; grid-template-columns:auto repeat(3, minmax(0,1fr)); gap:4px; }
+  .ws-c { padding:4px 3px; border:1px solid var(--bd); text-align:center; font-size:11px; line-height:1.35; }
+  .ws-c .r { font-weight:700; }
+  .ws-h { border:0; color:var(--dim); font-size:9px; text-transform:uppercase; letter-spacing:.5px; align-self:end; }
+  .ws-rl { border:0; color:var(--dim); font-size:9px; text-transform:uppercase; text-align:left; display:flex; align-items:center; }
   .hint { font-size:10px; color:var(--dim); margin-top:5px; line-height:1.4; }
   /* fixed-size boards that wrap; bigger difficulties = physically bigger boards */
   .boards { display:flex; flex-wrap:wrap; gap:6px; align-items:flex-start; }
@@ -153,6 +158,24 @@
       <div class="chart-row"><span class="chart-lbl" style="color:var(--warn)">train wins %</span><canvas id="chart_train" width="440" height="200"></canvas></div>
       <div class="chart-row"><span class="chart-lbl" style="color:var(--ok)">lifetime sessions trained</span><canvas id="chart_sessions" width="440" height="200"></canvas></div>
     </div>
+  </div></section>
+
+  <section class="panel"><h2>play win-rates (solver) · live</h2><div class="b">
+    <div class="winstats">
+      <div class="ws-c ws-h"></div>
+      <div class="ws-c ws-h">beginner</div>
+      <div class="ws-c ws-h">inter</div>
+      <div class="ws-c ws-h">expert</div>
+      <div class="ws-c ws-rl">standard</div>
+      <div class="ws-c" id="ws_std_beginner">–</div>
+      <div class="ws-c" id="ws_std_intermediate">–</div>
+      <div class="ws-c" id="ws_std_expert">–</div>
+      <div class="ws-c ws-rl">NG</div>
+      <div class="ws-c" id="ws_ng_beginner">–</div>
+      <div class="ws-c" id="ws_ng_intermediate">–</div>
+      <div class="ws-c" id="ws_ng_expert">–</div>
+    </div>
+    <div class="hint">각 칸: 승률 % · <b style="color:var(--ok)">W</b>승/<b style="color:var(--bad)">L</b>패 (대시보드 플레이 누적, 실시간).</div>
   </div></section>
 
   </div>
@@ -322,6 +345,19 @@ function applyStatus(s){
     pruneBoards(s.play.parallel);
   }
   drawChart(s.metrics || []);
+  if (s.play_stats) updateWinStats(s.play_stats);
+}
+function updateWinStats(ps){
+  for (const d of ["beginner","intermediate","expert"]){
+    for (const mode of ["std","ng"]){
+      const cell = $(`ws_${mode}_${d}`); if (!cell) continue;
+      const st = ps[d] && ps[d][mode];
+      const g = st ? st.g : 0, w = st ? st.w : 0, l = g - w;
+      cell.innerHTML = g > 0
+        ? `<span class="r">${Math.round(100*w/g)}%</span><br><span class="mono"><b style="color:var(--ok)">${w}</b>/<b style="color:var(--bad)">${l}</b></span>`
+        : `<span class="dim">–</span>`;
+    }
+  }
 }
 
 async function post(url, body){ try { await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}); } catch(e){} }

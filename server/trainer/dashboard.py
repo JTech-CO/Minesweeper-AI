@@ -42,6 +42,9 @@ MANAGER: TrainingManager | None = None
 PLAY: dict = {"parallel": 2, "difficulty": "beginner", "delay": 0.22, "no_guess": False}
 # Boards grow with difficulty (fixed cell size), so fewer fit on screen → cap per difficulty.
 MAX_PARALLEL = {"beginner": 18, "intermediate": 8, "expert": 4}
+# Live per-(difficulty, mode) play results for the dashboard win-rate grid. mode = std | ng.
+# Mutated only from the event loop (board_task), so no lock needed.
+PLAY_STATS: dict = {d: {"std": {"w": 0, "g": 0}, "ng": {"w": 0, "g": 0}} for d in DIFFICULTIES}
 
 
 @asynccontextmanager
@@ -253,11 +256,16 @@ async def ws(websocket: WebSocket) -> None:
                         }
                     )
                     await asyncio.sleep(PLAY["delay"])
+            won = env.status == "won"
+            st = PLAY_STATS[diff]["ng" if ng else "std"]  # diff/ng captured at this board's start
+            st["g"] += 1
+            if won:
+                st["w"] += 1
             emit(
                 {
                     "type": "board_result",
                     "slot": slot,
-                    "won": env.status == "won",
+                    "won": won,
                     "moves": move,
                     "elapsedMs": round((time.monotonic() - start) * 1000, 1),
                 }
@@ -272,6 +280,7 @@ async def ws(websocket: WebSocket) -> None:
                     **MANAGER.snapshot(),
                     "play": PLAY,
                     "max_parallel": MAX_PARALLEL,
+                    "play_stats": PLAY_STATS,
                 }
             )
             await asyncio.sleep(1.0)
