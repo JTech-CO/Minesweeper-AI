@@ -353,9 +353,9 @@ function updateWinStats(ps){
       const cell = $(`ws_${mode}_${d}`); if (!cell) continue;
       const st = ps[d] && ps[d][mode];
       const g = st ? st.g : 0, w = st ? st.w : 0, l = g - w;
-      cell.innerHTML = g > 0
-        ? `<span class="r">${Math.round(100*w/g)}%</span><br><span class="mono"><b style="color:var(--ok)">${w}</b>/<b style="color:var(--bad)">${l}</b></span>`
-        : `<span class="dim">–</span>`;
+      const avg = (st && w > 0) ? (st.wms/w/1000).toFixed(3)+"초" : "–";
+      cell.innerHTML = `<span class="mono">W: <b style="color:var(--ok)">${w}</b> / `
+        + `L: <b style="color:var(--bad)">${l}</b> / ${avg}</span>`;
     }
   }
 }

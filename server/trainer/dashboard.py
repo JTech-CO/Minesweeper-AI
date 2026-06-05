@@ -43,8 +43,12 @@ PLAY: dict = {"parallel": 2, "difficulty": "beginner", "delay": 0.22, "no_guess"
 # Boards grow with difficulty (fixed cell size), so fewer fit on screen → cap per difficulty.
 MAX_PARALLEL = {"beginner": 18, "intermediate": 8, "expert": 4}
 # Live per-(difficulty, mode) play results for the dashboard win-rate grid. mode = std | ng.
+# w=wins, g=games, wms=summed solve-time (ms) of WINS → avg win time = wms/w.
 # Mutated only from the event loop (board_task), so no lock needed.
-PLAY_STATS: dict = {d: {"std": {"w": 0, "g": 0}, "ng": {"w": 0, "g": 0}} for d in DIFFICULTIES}
+PLAY_STATS: dict = {
+    d: {"std": {"w": 0, "g": 0, "wms": 0.0}, "ng": {"w": 0, "g": 0, "wms": 0.0}}
+    for d in DIFFICULTIES
+}
 
 
 @asynccontextmanager
@@ -257,17 +261,19 @@ async def ws(websocket: WebSocket) -> None:
                     )
                     await asyncio.sleep(PLAY["delay"])
             won = env.status == "won"
+            elapsed_ms = (time.monotonic() - start) * 1000
             st = PLAY_STATS[diff]["ng" if ng else "std"]  # diff/ng captured at this board's start
             st["g"] += 1
             if won:
                 st["w"] += 1
+                st["wms"] += elapsed_ms
             emit(
                 {
                     "type": "board_result",
                     "slot": slot,
                     "won": won,
                     "moves": move,
-                    "elapsedMs": round((time.monotonic() - start) * 1000, 1),
+                    "elapsedMs": round(elapsed_ms, 1),
                 }
             )
             await asyncio.sleep(1.0)
