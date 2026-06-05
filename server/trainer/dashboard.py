@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import csv
+import json
 import os
 import random
 import re
@@ -49,6 +50,60 @@ PLAY_STATS: dict = {
     d: {"std": {"w": 0, "g": 0, "wms": 0.0}, "ng": {"w": 0, "g": 0, "wms": 0.0}}
     for d in DIFFICULTIES
 }
+# Per-second win-rate samples {s: lifetime sessions, e: eval_wr, t: train_wr} for the zoom
+# candlestick view. Both this and PLAY_STATS are persisted (dash_stats.json) so they survive
+# a dashboard restart / browser refresh.
+WINRATE_HISTORY: list = []
+WINRATE_CAP = 7200
+
+
+def _stats_path(base: Path) -> Path:
+    return base / "dash_stats.json"
+
+
+def _load_stats(base: Path) -> None:
+    try:
+        data = json.loads(_stats_path(base).read_text())
+    except (OSError, ValueError):
+        return
+    ps = data.get("play_stats") or {}
+    for d, modes in PLAY_STATS.items():
+        for mode, cell in modes.items():
+            src = (ps.get(d) or {}).get(mode) or {}
+            cell["w"], cell["g"] = int(src.get("w", 0)), int(src.get("g", 0))
+            cell["wms"] = float(src.get("wms", 0.0))
+    WINRATE_HISTORY.clear()
+    WINRATE_HISTORY.extend((data.get("winrate") or [])[-WINRATE_CAP:])
+
+
+def _save_stats(base: Path) -> None:
+    try:
+        _stats_path(base).write_text(
+            json.dumps({"play_stats": PLAY_STATS, "winrate": WINRATE_HISTORY[-WINRATE_CAP:]})
+        )
+    except OSError:
+        pass
+
+
+async def _winrate_sampler(base: Path) -> None:
+    """Once a second, record the current eval/train win-rate + lifetime sessions. Dedups
+    identical consecutive samples (so idle/stopped periods don't flood the buffer). Persists
+    every 5s regardless — so play-stats + history survive even a non-graceful console close."""
+    tick = 0
+    while True:
+        await asyncio.sleep(1.0)
+        tick += 1
+        if MANAGER is not None:
+            snap = MANAGER.snapshot()
+            ev = snap["metrics"][-1].get("eval_wr") if snap.get("metrics") else None
+            tr = (snap.get("latest") or {}).get("train_wr")
+            sample = {"s": snap.get("cumulative_episodes", 0), "e": ev, "t": tr}
+            if not (WINRATE_HISTORY and WINRATE_HISTORY[-1] == sample):
+                WINRATE_HISTORY.append(sample)
+                if len(WINRATE_HISTORY) > WINRATE_CAP:
+                    del WINRATE_HISTORY[: len(WINRATE_HISTORY) - WINRATE_CAP]
+        if tick % 5 == 0:
+            _save_stats(base)
 
 
 @asynccontextmanager
@@ -67,13 +122,17 @@ async def lifespan(_app: FastAPI):
         bootstrap_ckpt=str(boot_ckpt) if boot_ckpt.exists() else None, bootstrap_episode=boot_ep,
     )
     PLAY["difficulty"] = diff
+    _load_stats(base)  # restore play-stats + win-rate history (survive restart)
     if os.environ.get("MSAI_NO_TRAIN") != "1":
         MANAGER.start()
+    sampler = asyncio.create_task(_winrate_sampler(base))
     print(
         f"[dashboard] manager ready: ep={MANAGER.cumulative_episodes} dev={MANAGER.device}",
         flush=True,
     )
     yield
+    sampler.cancel()
+    _save_stats(base)
     if MANAGER is not None:
         MANAGER.stop()
 
@@ -133,8 +192,15 @@ def status() -> JSONResponse:
             "play": PLAY,
             "difficulties": list(DIFFICULTIES),
             "max_parallel": MAX_PARALLEL,
+            "play_stats": PLAY_STATS,
         }
     )
+
+
+@app.get("/api/winrate")
+def winrate() -> JSONResponse:
+    """Recent per-second win-rate samples for the zoom candlestick view."""
+    return JSONResponse({"history": WINRATE_HISTORY[-600:]})
 
 
 @app.post("/api/control")

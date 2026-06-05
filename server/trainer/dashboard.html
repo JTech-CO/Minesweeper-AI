@@ -64,6 +64,13 @@
   .ws-c .r { font-weight:700; }
   .ws-h { border:0; color:var(--dim); font-size:9px; text-transform:uppercase; letter-spacing:.5px; align-self:end; }
   .ws-rl { border:0; color:var(--dim); font-size:9px; text-transform:uppercase; text-align:left; display:flex; align-items:center; }
+  .zoom-btn { font-size:9px; padding:0 4px; line-height:1.5; vertical-align:middle; }
+  #zoom_overlay { display:none; position:fixed; inset:0; z-index:100; padding:18px;
+    background:rgba(8,11,14,.93); flex-direction:column; }
+  #zoom_overlay.on { display:flex; }
+  .zoom-bar { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+  #zoom_title { font-size:13px; color:var(--tx); }
+  #zoom_canvas { width:100%; flex:1; min-height:0; background:var(--panel); border:1px solid var(--bd); }
   .hint { font-size:10px; color:var(--dim); margin-top:5px; line-height:1.4; }
   /* fixed-size boards that wrap; bigger difficulties = physically bigger boards */
   .boards { display:flex; flex-wrap:wrap; gap:6px; align-items:flex-start; }
@@ -154,8 +161,8 @@
 
   <section class="panel"><h2>training curves</h2><div class="b">
     <div class="charts">
-      <div class="chart-row"><span class="chart-lbl" style="color:var(--acc)">eval wins %</span><canvas id="chart_eval" width="440" height="200"></canvas></div>
-      <div class="chart-row"><span class="chart-lbl" style="color:var(--warn)">train wins %</span><canvas id="chart_train" width="440" height="200"></canvas></div>
+      <div class="chart-row"><span class="chart-lbl" style="color:var(--acc)">eval wins % <button class="zoom-btn" data-series="eval">⤢</button></span><canvas id="chart_eval" width="440" height="200"></canvas></div>
+      <div class="chart-row"><span class="chart-lbl" style="color:var(--warn)">train wins % <button class="zoom-btn" data-series="train">⤢</button></span><canvas id="chart_train" width="440" height="200"></canvas></div>
       <div class="chart-row"><span class="chart-lbl" style="color:var(--ok)">lifetime sessions trained</span><canvas id="chart_sessions" width="440" height="200"></canvas></div>
     </div>
   </div></section>
@@ -207,6 +214,10 @@
   <div class="boards" id="boards"></div>
   </div>
 </main>
+<div id="zoom_overlay">
+  <div class="zoom-bar"><span id="zoom_title" class="mono"></span><button id="zoom_close">close</button></div>
+  <canvas id="zoom_canvas" width="1800" height="700"></canvas>
+</div>
 <script>
 const $ = (id) => document.getElementById(id);
 
@@ -406,6 +417,38 @@ function drawMini(id, series, getY, color, isRate){
   ctx.fillStyle="#697078"; ctx.fillText("ep "+series[0].episode, pad, H-4);
   const last="ep "+series[n-1].episode; ctx.fillText(last, W-6-ctx.measureText(last).width, H-4);
 }
+
+// ---- zoom: per-second candlestick of eval/train win-rate (persisted, 1s update) ----
+let zoomSeries=null, zoomTimer=null;
+function openZoom(series){
+  zoomSeries=series;
+  $("zoom_title").textContent = (series==="eval"?"eval wins %":"train wins %") + " · 초당 캔들 (lifetime sessions 기반)";
+  $("zoom_overlay").classList.add("on");
+  zoomTick(); if (zoomTimer) clearInterval(zoomTimer); zoomTimer=setInterval(zoomTick,1000);
+}
+function closeZoom(){ $("zoom_overlay").classList.remove("on"); if(zoomTimer){clearInterval(zoomTimer); zoomTimer=null;} }
+async function zoomTick(){ try { const r=await fetch("/api/winrate"); const d=await r.json(); drawCandles(d.history||[]); } catch(e){} }
+function drawCandles(hist){
+  const cv=$("zoom_canvas"), ctx=cv.getContext("2d"), W=cv.width, H=cv.height, pad=54;
+  ctx.clearRect(0,0,W,H);
+  ctx.strokeStyle="#1e2630"; ctx.fillStyle="#697078"; ctx.lineWidth=1; ctx.font="18px ui-monospace";
+  for (let g=0; g<=4; g++){ const y=pad+(H-2*pad)*(1-g/4); ctx.beginPath(); ctx.moveTo(pad,y); ctx.lineTo(W-12,y); ctx.stroke(); ctx.fillText((g*25)+"%",8,y+6); }
+  const key = zoomSeries==="eval" ? "e" : "t";
+  const pts = hist.filter(h => h[key]!=null);
+  if (pts.length < 2){ ctx.fillStyle="#697078"; ctx.fillText("데이터 누적 중… 학습이 진행되면 채워집니다.", pad, H/2); return; }
+  const n=pts.length, Y=v=>pad+(H-2*pad)*(1-Math.max(0,Math.min(1,v))), cw=(W-pad-12)/n;
+  for (let i=1;i<n;i++){
+    const o=pts[i-1][key], c=pts[i][key], up=c>=o, x=pad+(i-0.5)*cw;
+    ctx.strokeStyle=ctx.fillStyle = up?"#43b04a":"#d24b43";
+    ctx.beginPath(); ctx.moveTo(x,Y(Math.max(o,c))); ctx.lineTo(x,Y(Math.min(o,c))); ctx.stroke();
+    const bw=Math.max(1.5,cw*0.6), yo=Y(o), yc=Y(c);
+    ctx.fillRect(x-bw/2, Math.min(yo,yc), bw, Math.max(1.5,Math.abs(yo-yc)));
+  }
+  ctx.fillStyle="#697078"; ctx.fillText("sessions "+pts[0].s, pad, H-18);
+  const last="sessions "+pts[n-1].s; ctx.fillText(last, W-12-ctx.measureText(last).width, H-18);
+}
+document.querySelectorAll(".zoom-btn").forEach(b => b.onclick = () => openZoom(b.dataset.series));
+$("zoom_close").onclick = closeZoom;
 </script>
 </body>
 </html>
