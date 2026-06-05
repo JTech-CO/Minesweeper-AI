@@ -5,7 +5,8 @@
 ---
 
 ## 현재 상태
-- **현재 Phase**: M4 진행 중. **모델 단독 학습은 정체(beginner best 0.205, ~무작위 추론 수준)** — 통제 진단으로 근본원인 확정(아래). 사용자 결정 **C**로 **B(솔버-하이브리드, 부분 M7)를 먼저 적용해 시연 승률 확보** → **다음은 A(M4 RL 보상/탐험 교정 재학습)**.
+- **현재 Phase**: **M4 단독 RL은 보류(deferred)** — 플레이는 **솔버-하이브리드/NG가 정본**. 다음은 사용자가 정할 다른 작업(M7 ONNX/TS·M8 web·M9 어댑터 등).
+- **M4 RL 결론(2026-06-05 실험)**: 평범한 보상 셰이핑으로는 0.85 불가. shaped(+0.3)=정점 ~0.20(reveal-maximizer 정체), sparse=~0(부트스트랩 불가), mineavoid(loss−3)=~0.01(과도회피). §4 멈춤 → 단독 NN 보류, 솔버-하이브리드로 대체. (게이트 통과 원하면 솔버-증류가 유력하나 하이브리드와 중복.)
 - **플레이 승률(솔버 하이브리드, 측정)**: 표준 랜덤 보드 beginner **0.948** / intermediate **0.820** / expert **0.370**(표준 강제-추측 상한). 모델 단독은 beginner 0.193.
 - **NG(무추측) 모드 추가**: 대시보드 보드에 NG 토글 — 추측 없이 풀리는 보드만 생성 + 배치 솔버 → **전 난이도 100% 클리어**(검증 100/60/40). 일관 시연용. (온라인 실사이트 플레이는 랜덤 보드 그대로.)
 - **마지막 갱신**: 2026-06-05
@@ -101,3 +102,4 @@
 - **2026-06-04**: 사용자 요청으로 **실제 사이트 플레이(minesweeper.online)** 추가 — `trainer/online.py`(Playwright 서버측, 모델이 DOM 보드 읽고 클릭, 대시보드에 스트리밍) + `/api/online` + UI URL/Play/Stop. **개인 시연·레이트제한·약관 준수**(공개 순위 자동제출 금지). DOM 계약(`cell_X_Y`/`hd_*`)은 한 곳에 격리(런북 10). **검증 한계**: headless 샌드박스에서 minesweeper.online이 보드를 렌더 안 함(세션/동의/봇차단 가능성) → **가시 브라우저(headless=False) 기본** + 사용자 실제 게임 URL로 검증 필요(셀렉터 보정은 `online.py` 1곳). parse_board 단위·엔드포인트 검증·ruff/pytest 그린.
 - **2026-06-05**: 대시보드 마무리(난이도별 고정칸 보드+펄스), **온라인 플레이 안정화**(uvicorn reload 워커 SelectorEventLoop→Playwright 서브프로세스 NotImplementedError를 전용 Proactor 스레드/메인루프 적응 실행으로 해결; 보드 렌더 대기+0-인덱스 좌표 수정; CPS·시도·ms·승패 자체측정 + 연속 플레이; **Google OAuth 차단 우회 위해 실제 Chrome CDP 연결** 로그인). **승률 정체 진단**: managed_state 730k·best 0.205, eval 완전 평탄 → M4 게이트 실패(Expert 상한과 무관). 통제 진단(체크포인트 로드): 확정-안전 추종 58%·확정-지뢰 클릭 3.4%·무작위 대비 미미 → **모델이 deduction 미학습**(조밀보상 Q포화 + eps바닥 재개 가설). 사용자 결정 **C** → **B 구현**: `trainer/solver.py`(TS 솔버 M2 충실 이식, **거짓양성 0** 게이트 580보드 통과, 논리클리어 88/65/12%) + `manager.hybrid_act`(확정안전→최저확률 추측→모델 폴백) + 대시보드/온라인 플레이 연결. 측정 승률 beginner 0.948·inter 0.820·expert 0.370. 이어 **NG(무추측) 모드** 추가(`generate_no_guess_board` + 대시보드 배치 솔버 + UI 토글) → 전 난이도 **100% 클리어**(검증 100/60/40). pytest 25 그린. **다음: A(M4 RL 재학습 교정) 또는 정식 M7(TS 하이브리드+ONNX).**
 - **2026-06-04**: 사용자 요청으로 대시보드를 **통합 관리 시스템**으로 확장. `trainer/manager.py`(인프로세스 관리형 학습: pause/resume·라이브 hp·resume·영속 누적카운트·GPU 모니터·play_net 스냅샷) + `dashboard.py` 컨트롤플레인(REST 제어 + WS 상태/병렬보드) + `dashboard.html` 관리 UI. nvidia-ml-py(읽기전용 GPU). E2E 검증(상태/GPU/병렬플레이/제어), 관리형 학습 루프 검증(카운트·pause/resume·영속). **오버클럭은 안전상 미지원**(사용자 합의). 다음: 현재 detached 학습 중지 후 관리형으로 전환(resume).
+- **2026-06-05**: live hyperparameters 설명+reset 버튼 추가(`/api/config` reset). **A(M4 RL 교정) 시도→보류**: train.py로 격리 실험(GPU 경합 줄이려 대시보드 학습 `/api/control stop`). sparse=~0(부트스트랩 불가)·mineavoid(loss−3)=~0.01(과도회피)·shaped=~0.20 정점. 평범한 보상으론 0.85 불가 확인 → §4 멈춤. 사용자 결정: **M4 단독 보류, 솔버-하이브리드를 플레이 정본으로**. 실험 산출물·프리셋 정리/revert(레포 클린). 대시보드 학습은 정지 상태(퇴화 중이었음). **다음: 사용자가 정할 작업(M7 ONNX/TS·M8·M9 등).**
