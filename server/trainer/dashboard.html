@@ -121,6 +121,7 @@
         <tr><td class="k">train win%</td><td class="v" id="m_train">—</td></tr>
         <tr><td class="k">loss</td><td class="v" id="m_loss">—</td></tr>
         <tr><td class="k">epsilon</td><td class="v" id="m_eps">—</td></tr>
+        <tr><td class="k">lr (decayed)</td><td class="v" id="m_lr">—</td></tr>
         <tr><td class="k">steps/s</td><td class="v" id="m_sps">—</td></tr>
       </table>
     </div></section>
@@ -323,6 +324,7 @@ function applyStatus(s){
   $("m_train").textContent = fmtPct(L.train_wr);
   $("m_loss").textContent = (L.loss==null)?"—":L.loss;
   $("m_eps").textContent = (L.eps==null)?"—":L.eps;
+  $("m_lr").textContent = (L.lr==null)?"—":L.lr;
   $("m_sps").textContent = (L.sps==null)?"—":L.sps;
   // config inputs (don't clobber while editing)
   if (!editing && s.config){

@@ -88,6 +88,11 @@ class TrainingManager:
     EVAL_GAMES = 200
     PERSIST_EVERY = 2_000
     PLAY_SYNC_STEPS = 400
+    # Late lr decay: effective lr = cfg.lr * max(LR_MIN_FACTOR, 1 - global_step/LR_DECAY_STEPS).
+    # Fresh runs decay over the horizon; a resumed late-stage model (22M+ steps) starts at the
+    # lower end → finer convergence (fine-tune toward a higher, less noisy eval).
+    LR_DECAY_STEPS = 32_000_000
+    LR_MIN_FACTOR = 0.2
 
     def __init__(
         self,
@@ -345,6 +350,11 @@ class TrainingManager:
                 with self._lock:
                     batch_n, train_freq = self.cfg.batch, self.cfg.train_freq
                 if len(self.replay) >= self.WARMUP and self.global_step % train_freq == 0:
+                    lr = self.cfg.lr * max(
+                        self.LR_MIN_FACTOR, 1.0 - self.global_step / self.LR_DECAY_STEPS
+                    )
+                    for grp in self.agent.opt.param_groups:
+                        grp["lr"] = lr
                     batch = self.replay.sample(batch_n, beta=0.6)
                     last_loss, td = self.agent.learn(batch, batch["weights"])
                     self.replay.update_priorities(batch["indices"], td)
@@ -356,11 +366,16 @@ class TrainingManager:
             recent.append(1 if info["won"] else 0)
             recent = recent[-500:]
             sps = (self.global_step - self._steps_at_t0) / max(time.time() - self._t0, 1e-9)
+            lr_now = self.cfg.lr * max(
+                self.LR_MIN_FACTOR, 1.0 - self.global_step / self.LR_DECAY_STEPS
+            )
             with self._lock:
                 self.latest = {
                     "train_wr": float(np.mean(recent)) if recent else 0.0,
-                    "loss": round(last_loss, 4),
+                    # loss is nan until the first learn (replay warmup); None keeps JSON valid.
+                    "loss": round(last_loss, 4) if last_loss == last_loss else None,
                     "eps": round(self._eps(), 3),
+                    "lr": round(lr_now, 6),
                     "sps": round(sps),
                 }
 
