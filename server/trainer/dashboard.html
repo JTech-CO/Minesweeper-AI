@@ -1,482 +1,63 @@
 <!doctype html>
-<html lang="en">
+<html lang="ko">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>minesweeper-ai // management</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Minesweeper AI / R3 Control</title>
 <style>
-  /* CLI / terminal style: monospace, minimal colour, thin borders, no shadows/gradients/
-     transitions (low paint/RAM). Board keeps classic number/mine colours for readability. */
-  :root {
-    --cell:18px;  /* fixed minesweeper cell size (beginner=min); boards grow with difficulty */
-    --bg:#0a0d10; --panel:#0e1217; --bd:#1e2630; --tx:#c4ccd4; --dim:#697078;
-    --ok:#43b04a; --warn:#caa23a; --bad:#d24b43; --acc:#4f8cc9;
-    --n1:#4f8cc9; --n2:#43b04a; --n3:#d24b43; --n4:#9a6ee0;
-    --n5:#caa23a; --n6:#3bb0bf; --n7:#aeb6bf; --n8:#6b7480;
-  }
-  * { box-sizing:border-box; }
-  body { margin:0; background:var(--bg); color:var(--tx);
-    font:12px/1.4 ui-monospace,"JetBrains Mono","Cascadia Code",Consolas,monospace; }
-  header { display:flex; align-items:baseline; gap:10px; padding:5px 10px; border-bottom:1px solid var(--bd); }
-  header h1 { font-size:12px; font-weight:600; margin:0; letter-spacing:.5px; }
-  header h1 .dim { color:var(--dim); font-weight:400; }
-  .dot { width:7px; height:7px; background:var(--bad); display:inline-block; }
-  .dot.on { background:var(--ok); }
-  .badge { padding:0 6px; border:1px solid var(--bd); font-size:11px; }
-  .badge.running { color:var(--ok); border-color:var(--ok); }
-  .badge.paused { color:var(--warn); border-color:var(--warn); }
-  .badge.stopped, .badge.idle { color:var(--dim); }
-  .badge.playing { color:var(--acc); border-color:var(--acc); }
-  .badge.won { color:var(--ok); border-color:var(--ok); }
-  .badge.lost { color:var(--bad); border-color:var(--bad); }
-  .count { margin-left:auto; text-align:right; }
-  .count .k { font-size:9px; color:var(--dim); letter-spacing:1px; text-transform:uppercase; }
-  .count .v { font-size:16px; font-weight:700; color:var(--ok); }
-  main { padding:8px; display:grid; grid-template-columns:1.1fr 0.9fr; gap:8px; align-items:start; }
-  .col { display:flex; flex-direction:column; gap:8px; min-width:0; }
-  .cols { display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:8px; align-items:start; }
-  @media (max-width:980px){ main { grid-template-columns:1fr; } }
-  .panel { border:1px solid var(--bd); background:var(--panel); }
-  .panel > h2 { margin:0; padding:2px 8px; font-size:10px; font-weight:600; color:var(--dim);
-    text-transform:uppercase; letter-spacing:1.2px; border-bottom:1px solid var(--bd); }
-  .panel > .b { padding:6px 8px; }
-  table.kv { width:100%; border-collapse:collapse; }
-  table.kv td { padding:1.5px 0; }
-  table.kv td.k { color:var(--dim); }
-  table.kv td.v { text-align:right; }
-  .row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
-  .row + .row { margin-top:6px; }
-  label.fld { display:flex; flex-direction:column; gap:2px; font-size:10px; color:var(--dim);
-    text-transform:uppercase; letter-spacing:.5px; }
-  input, select, button { font:inherit; color:var(--tx); background:var(--bg); border:1px solid var(--bd); padding:2px 5px; }
-  input[type=number] { width:74px; }
-  button { cursor:pointer; background:#11161c; }
-  button:hover { border-color:var(--acc); color:var(--acc); }
-  .gauge { height:5px; background:#11161c; border:1px solid var(--bd); margin-top:3px; }
-  .gauge > span { display:block; height:100%; background:var(--acc); }
-  .gauge.warm > span { background:var(--warn); }
-  .gauge.hot > span { background:var(--bad); }
-  canvas { width:100%; height:120px; display:block; }
-  .charts { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:8px; }
-  .chart-lbl { font-size:10px; font-weight:700; letter-spacing:.5px; display:block; margin-bottom:1px; }
-  .winstats { display:grid; grid-template-columns:auto repeat(3, minmax(0,1fr)); gap:4px; }
-  .ws-c { padding:4px 3px; border:1px solid var(--bd); text-align:center; font-size:11px; line-height:1.35; }
-  .ws-c .r { font-weight:700; }
-  .ws-h { border:0; color:var(--dim); font-size:9px; text-transform:uppercase; letter-spacing:.5px; align-self:end; }
-  .ws-rl { border:0; color:var(--dim); font-size:9px; text-transform:uppercase; text-align:left; display:flex; align-items:center; }
-  .zoom-btn { font-size:9px; padding:0 4px; line-height:1.5; vertical-align:middle; }
-  #zoom_overlay { display:none; position:fixed; inset:0; z-index:100; padding:18px;
-    background:rgba(8,11,14,.93); flex-direction:column; }
-  #zoom_overlay.on { display:flex; }
-  .zoom-bar { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
-  #zoom_title { font-size:13px; color:var(--tx); }
-  #zoom_canvas { width:100%; flex:1; min-height:0; background:var(--panel); border:1px solid var(--bd); }
-  .hint { font-size:10px; color:var(--dim); margin-top:5px; line-height:1.4; }
-  /* fixed-size boards that wrap; bigger difficulties = physically bigger boards */
-  .boards { display:flex; flex-wrap:wrap; gap:6px; align-items:flex-start; }
-  .board-panel { border:1px solid var(--bd); background:var(--panel); width:fit-content; }
-  .board-panel.flash-win { animation:flash-win .7s ease-out 1; }
-  .board-panel.flash-lose { animation:flash-lose .7s ease-out 1; }
-  @keyframes flash-win { 0%,100% { border-color:var(--bd); } 30% { border-color:var(--ok); } }
-  @keyframes flash-lose { 0%,100% { border-color:var(--bd); } 30% { border-color:var(--bad); } }
-  .board-head { display:flex; justify-content:space-between; align-items:center; gap:6px;
-    padding:2px 5px; height:18px; font-size:10px; color:var(--dim);
-    border-bottom:1px solid var(--bd); white-space:nowrap; overflow:hidden; }
-  .grid { display:grid; gap:1px; width:max-content; padding:3px; }
-  .cell { display:flex; align-items:center; justify-content:center; overflow:hidden; line-height:1;
-    font-weight:700; background:#11161c; width:var(--cell); height:var(--cell); font-size:calc(var(--cell) * 0.6); }
-  .cell.hidden { background:#1b222b; }
-  .cell.open { background:#0a0e12; color:var(--dim); }
-  .cell.n1 { color:var(--n1); } .cell.n2 { color:var(--n2); } .cell.n3 { color:var(--n3); }
-  .cell.n4 { color:var(--n4); } .cell.n5 { color:var(--n5); } .cell.n6 { color:var(--n6); }
-  .cell.n7 { color:var(--n7); } .cell.n8 { color:var(--n8); }
-  .cell.mine { background:#3a2026; color:var(--bad); }
-  .cell.exploded { background:var(--bad); color:#fff; }
-  .cell.last { outline:1px solid var(--acc); outline-offset:-1px; }
+:root{--bg:#0d1114;--panel:#12181c;--line:#2a343a;--text:#d7e0e4;--muted:#7e9099;--blue:#4ca3ff;--yellow:#e9c14b;--green:#52c77b;--red:#e16060;--cell:18px}
+*{box-sizing:border-box}body{margin:0;background:linear-gradient(135deg,#0d1114,#10171a 60%,#0c1113);color:var(--text);font-family:"IBM Plex Mono","Cascadia Mono",Consolas,monospace;font-size:12px}button,input,select{font:inherit;color:inherit;background:#0d1316;border:1px solid var(--line);border-radius:0;padding:6px 8px}button{cursor:pointer;text-transform:uppercase;letter-spacing:.05em}button:hover{border-color:#60727b}button.primary{border-color:var(--blue);color:var(--blue)}button.danger{border-color:var(--red);color:var(--red)}header{height:58px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 16px;background:#0c1114}h1{font-size:15px;letter-spacing:.12em;margin:0}h1 span{color:var(--green)}.lifetime{text-align:right}.lifetime strong{display:block;color:var(--green);font-size:20px}main{display:grid;grid-template-columns:minmax(560px,1fr) minmax(560px,1fr);min-height:calc(100vh - 58px)}.side{padding:10px;min-width:0}.side+ .side{border-left:1px solid var(--line)}.panel{background:var(--panel);border:1px solid var(--line);margin-bottom:8px}.panel h2{font-size:11px;letter-spacing:.1em;margin:0;padding:7px 9px;border-bottom:1px solid var(--line);color:#aebcc2;text-transform:uppercase}.body{padding:8px}.row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}.row+.row{margin-top:7px}.kv{display:grid;grid-template-columns:repeat(4,minmax(90px,1fr));gap:1px;background:var(--line);border:1px solid var(--line)}.kv div{background:var(--panel);padding:7px}.kv small{display:block;color:var(--muted);margin-bottom:4px}.kv b{font-weight:500}.dot{display:inline-block;width:7px;height:7px;background:var(--muted);margin-right:6px}.dot.running{background:var(--green)}.dot.failed{background:var(--red)}.config{display:grid;grid-template-columns:repeat(4,minmax(100px,1fr));gap:7px}.field label{display:block;color:var(--muted);font-size:10px;margin-bottom:3px}.field input,.field select{width:100%}.gpu{height:7px;background:#090d0f;border:1px solid var(--line);flex:1}.gpu i{display:block;height:100%;background:var(--blue);width:0}.curves{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.curve{border:1px solid var(--line);padding:5px;min-width:0}.curve-head{display:flex;justify-content:space-between;color:var(--muted);margin-bottom:3px}.curve canvas{display:block;width:100%;height:112px}.play-head{display:flex;justify-content:space-between;gap:8px;align-items:center}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:8px}.stat{border:1px solid var(--line);padding:7px}.stat b{display:block;margin-bottom:5px;color:var(--blue)}.stat span{display:block;line-height:1.6}.boards{display:flex;flex-wrap:wrap;gap:7px;align-items:flex-start}.board-panel{width:max-content;border:1px solid var(--line);background:#0a0e10}.board-panel.win{animation:winpulse .75s 1}.board-panel.loss{animation:losspulse .75s 1}.board-head,.board-result{height:22px;padding:4px 6px;white-space:nowrap;overflow:hidden;border-bottom:1px solid var(--line);color:var(--muted)}.board-result{border-top:1px solid var(--line);border-bottom:0}.grid{display:grid;width:max-content}.cell{width:var(--cell);height:var(--cell);display:flex;align-items:center;justify-content:center;border-right:1px solid #263035;border-bottom:1px solid #263035;background:#1a2429;font-size:11px;font-weight:600}.cell.open{background:#0f1518}.cell.mine{background:#33191a;color:var(--red)}.n1{color:#65a9ff}.n2{color:#64d58a}.n3{color:#f06d63}.n4{color:#a992ff}.n5{color:#e5a15d}.n6{color:#57c7cc}.n7{color:#d4dce0}.n8{color:#89979d}.muted{color:var(--muted)}.error{color:var(--red)}@keyframes winpulse{30%{border-color:var(--green);box-shadow:0 0 0 2px var(--green)}}@keyframes losspulse{30%{border-color:var(--red);box-shadow:0 0 0 2px var(--red)}}@media(max-width:1180px){main{grid-template-columns:1fr}.side+.side{border-left:0;border-top:1px solid var(--line)}.config{grid-template-columns:repeat(2,1fr)}}
 </style>
 </head>
 <body>
-<header>
-  <span class="dot" id="dot"></span>
-  <h1>minesweeper-ai <span class="dim">// management</span></h1>
-  <span class="badge idle" id="train_status">—</span>
-  <span class="count">
-    <span class="k">lifetime sessions trained</span><br />
-    <span class="v" id="count">—</span>
-  </span>
-</header>
+<header><h1>MINESWEEPER AI <span>/ R3 POLICY CONTROL</span></h1><div class="lifetime"><small>LIFETIME SESSIONS TRAINED</small><strong id="lifetime">0</strong></div></header>
 <main>
-  <div class="col">
-  <div class="cols">
-    <section class="panel"><h2>training control</h2><div class="b">
-      <div class="row">
-        <button id="btn_pause">pause</button>
-        <button id="btn_stop">stop</button>
-        <button id="btn_start">start</button>
-      </div>
-      <table class="kv" style="margin-top:6px">
-        <tr><td class="k">status</td><td class="v" id="m_status">—</td></tr>
-        <tr><td class="k">this run</td><td class="v" id="m_since">—</td></tr>
-        <tr><td class="k">eval win%</td><td class="v" id="m_eval" style="color:var(--ok)">—</td></tr>
-        <tr><td class="k">train win%</td><td class="v" id="m_train">—</td></tr>
-        <tr><td class="k">loss</td><td class="v" id="m_loss">—</td></tr>
-        <tr><td class="k">epsilon</td><td class="v" id="m_eps">—</td></tr>
-        <tr><td class="k">lr (decayed)</td><td class="v" id="m_lr">—</td></tr>
-        <tr><td class="k">steps/s</td><td class="v" id="m_sps">—</td></tr>
-      </table>
-    </div></section>
-
-    <section class="panel"><h2>live hyperparameters</h2><div class="b">
-      <div class="row">
-        <label class="fld">lr<input type="number" id="lr" step="0.0001" min="0" /></label>
-        <label class="fld">batch<input type="number" id="batch" step="32" min="8" /></label>
-      </div>
-      <div class="row">
-        <label class="fld">train every<input type="number" id="train_freq" step="1" min="1" /></label>
-        <label class="fld">eps floor<input type="number" id="eps_end" step="0.01" min="0" max="1" /></label>
-      </div>
-      <div class="row">
-        <button id="btn_apply">apply (no restart)</button>
-        <button id="btn_reset_hp">reset defaults</button>
-      </div>
-      <div class="hint">
-        <b>lr</b> 학습률 — 가중치 갱신 보폭(크면 빠르나 불안정). 기본 5e-4<br/>
-        <b>batch</b> 한 번 갱신에 쓰는 표본 수(크면 안정·연산↑). 기본 256<br/>
-        <b>train every</b> 몇 스텝마다 1회 학습(작을수록 자주 갱신). 기본 4<br/>
-        <b>eps floor</b> 탐험(무작위 행동) 확률의 최저값(0=순수 그리디). 기본 0.05
-      </div>
-    </div></section>
-
-    <section class="panel"><h2>gpu monitor · read-only</h2><div class="b">
-      <table class="kv"><tr><td class="k" id="gpu_name">gpu</td><td class="v" id="gpu_util">—</td></tr></table>
-      <div style="font-size:10px; color:var(--dim); margin-top:5px">vram <span id="gpu_vram">—</span></div>
-      <div class="gauge" id="gpu_vram_g"><span style="width:0%"></span></div>
-      <table class="kv" style="margin-top:6px">
-        <tr><td class="k">temp</td><td class="v" id="gpu_temp">—</td></tr>
-        <tr><td class="k">clock</td><td class="v" id="gpu_clock">—</td></tr>
-        <tr><td class="k">util</td><td class="v" id="gpu_u">—</td></tr>
-      </table>
-      <div class="hint">overclock 미지원 (안전·권한) · 읽기전용</div>
-    </div></section>
-  </div>
-
-  <section class="panel"><h2>training curves</h2><div class="b">
-    <div class="charts">
-      <div class="chart-row"><span class="chart-lbl" style="color:var(--acc)">eval wins % <button class="zoom-btn" data-series="eval">⤢</button></span><canvas id="chart_eval" width="440" height="200"></canvas></div>
-      <div class="chart-row"><span class="chart-lbl" style="color:var(--warn)">train wins % <button class="zoom-btn" data-series="train">⤢</button></span><canvas id="chart_train" width="440" height="200"></canvas></div>
-      <div class="chart-row"><span class="chart-lbl" style="color:var(--ok)">lifetime sessions trained</span><canvas id="chart_sessions" width="440" height="200"></canvas></div>
-    </div>
-  </div></section>
-
-  <section class="panel"><h2>play win-rates (solver) · live</h2><div class="b">
-    <div class="winstats">
-      <div class="ws-c ws-h"></div>
-      <div class="ws-c ws-h">beginner</div>
-      <div class="ws-c ws-h">inter</div>
-      <div class="ws-c ws-h">expert</div>
-      <div class="ws-c ws-rl">standard</div>
-      <div class="ws-c" id="ws_std_beginner">–</div>
-      <div class="ws-c" id="ws_std_intermediate">–</div>
-      <div class="ws-c" id="ws_std_expert">–</div>
-      <div class="ws-c ws-rl">NG</div>
-      <div class="ws-c" id="ws_ng_beginner">–</div>
-      <div class="ws-c" id="ws_ng_intermediate">–</div>
-      <div class="ws-c" id="ws_ng_expert">–</div>
-    </div>
-    <div class="hint">각 칸: 승률 % · <b style="color:var(--ok)">W</b>승/<b style="color:var(--bad)">L</b>패 (대시보드 플레이 누적, 실시간).</div>
-  </div></section>
-
-  </div>
-
-  <div class="col">
-  <section class="panel"><h2>play sessions</h2><div class="b">
-    <div class="row">
-      <label class="fld">parallel
-        <select id="parallel">
-          <option>1</option><option>2</option><option>3</option><option>4</option><option>5</option>
-          <option>6</option><option>7</option><option>8</option><option>9</option><option>10</option>
-          <option>11</option><option>12</option><option>13</option><option>14</option><option>15</option>
-          <option>16</option><option>17</option><option>18</option>
-        </select>
-      </label>
-      <label class="fld">difficulty
-        <select id="difficulty">
-          <option value="beginner">beginner 9x9 / 10</option>
-          <option value="intermediate">intermediate 16x16 / 40</option>
-          <option value="expert">expert 30x16 / 99</option>
-        </select>
-      </label>
-      <label class="fld" style="flex-direction:row; align-items:center; gap:5px">
-        <input type="checkbox" id="no_guess" /> NG (no-guess)
-      </label>
-    </div>
-    <div class="hint">NG = 추측 없이 풀리는 보드만 생성 → 솔버가 ~100% 클리어(일관 시연). 끄면 랜덤 보드(표준 승률).</div>
-  </div></section>
-  <div class="boards" id="boards"></div>
-  </div>
+<section class="side">
+  <div class="panel"><h2>Training worker</h2><div class="body">
+    <div class="row"><span><i id="worker_dot" class="dot"></i><b id="worker_status">IDLE</b></span><button id="start" class="primary">start</button><button id="pause">pause</button><button id="resume">resume</button><button id="stop" class="danger">stop</button></div>
+    <div class="kv" style="margin-top:8px"><div><small>UPDATE</small><b id="update">0</b></div><div><small>PPO EPISODES</small><b id="episodes">0</b></div><div><small>GLOBAL STEPS</small><b id="steps">0</b></div><div><small>LOSS</small><b id="loss">-</b></div></div>
+  </div></div>
+  <div class="panel"><h2>Run configuration / live values</h2><div class="body"><div class="config">
+    <div class="field"><label>TRAIN DIFFICULTY</label><select id="train_diff"><option value="beginner">BEGINNER</option><option value="intermediate">INTERMEDIATE</option><option value="expert">EXPERT</option></select></div>
+    <div class="field"><label>PARALLEL ENVS</label><input id="num_envs" type="number" min="1" max="64" value="32"></div>
+    <div class="field"><label>ROLLOUT STEPS</label><input id="rollout_steps" type="number" min="8" value="64"></div>
+    <div class="field"><label>MINIBATCH</label><input id="batch_size" type="number" min="32" value="512"></div>
+    <div class="field"><label>LEARNING RATE</label><input id="learning_rate" type="number" step="0.00001" value="0.0001"></div>
+    <div class="field"><label>ENTROPY COEF</label><input id="entropy_coef" type="number" step="0.001" value="0.01"></div>
+    <div class="field"><label>EVAL / UPDATES</label><input id="eval_every" type="number" min="1" value="50"></div>
+    <div class="field"><label>CHECKPOINT / UPDATES</label><input id="checkpoint_every" type="number" min="1" value="50"></div>
+  </div><div class="row"><button id="apply">apply live</button><span class="muted">LR controls step size. Entropy preserves exploration. Run shape locks after first start.</span></div></div></div>
+  <div class="panel"><h2>GPU monitor / read only</h2><div class="body"><div class="row"><b id="gpu_name">unavailable</b><span id="gpu_text" class="muted"></span><div class="gpu"><i id="gpu_bar"></i></div></div></div></div>
+  <div class="panel"><h2>Persistent training curves</h2><div class="body"><div class="curves">
+    <div class="curve"><div class="curve-head"><span>TRAIN WINS</span><b id="train_wr">-</b></div><canvas id="train_chart"></canvas></div>
+    <div class="curve"><div class="curve-head"><span>EVAL WINS</span><b id="eval_wr">-</b></div><canvas id="eval_chart"></canvas></div>
+    <div class="curve"><div class="curve-head"><span>LIFETIME</span><b id="curve_lifetime">-</b></div><canvas id="life_chart"></canvas></div>
+  </div></div></div>
+  <div class="panel"><h2>Checkpoint lineage</h2><div class="body"><span id="policy_status">waiting for axial checkpoint</span><div id="policy_path" class="muted"></div></div></div>
+</section>
+<section class="side">
+  <div class="panel"><h2>Policy-only play sessions / local boards</h2><div class="body">
+    <div class="play-head"><div class="row"><select id="play_diff"><option value="beginner">BEGINNER 9x9</option><option value="intermediate">INTERMEDIATE 16x16</option><option value="expert">EXPERT 30x16</option></select><select id="parallel"></select><button id="play_apply">apply</button></div><span id="socket" class="muted">connecting</span></div>
+    <div id="stats" class="stats"></div>
+  </div></div>
+  <div id="boards" class="boards"></div>
+</section>
 </main>
-<div id="zoom_overlay">
-  <div class="zoom-bar"><span id="zoom_title" class="mono"></span><button id="zoom_close">close</button></div>
-  <canvas id="zoom_canvas" width="1800" height="700"></canvas>
-</div>
 <script>
-const $ = (id) => document.getElementById(id);
-
-const NUMCLASS = {0:"open",1:"open n1",2:"open n2",3:"open n3",4:"open n4",5:"open n5",6:"open n6",7:"open n7",8:"open n8"};
-function cellView(v){
-  if (v === -1) return {cls:"hidden", txt:""};
-  if (v === -2) return {cls:"mine", txt:"✷"};
-  if (v === -3) return {cls:"exploded", txt:"✸"};
-  if (v === -4) return {cls:"hidden", txt:"⚑"};
-  return {cls:NUMCLASS[v], txt:(v===0?"":String(v))};
-}
-function fmtPct(x){ return (x==null||isNaN(x)) ? "—" : (x*100).toFixed(1)+"%"; }
-
-// ---- play boards ----
-const slots = {};  // slot -> {panel, grid, cells, cols, head, stat}
-function ensureBoard(slot){
-  if (slots[slot]) return slots[slot];
-  const panel = document.createElement("div"); panel.className = "board-panel";
-  const head = document.createElement("div"); head.className = "board-head";
-  const title = document.createElement("span"); title.textContent = "board " + (slot+1);
-  const stat = document.createElement("span"); stat.className = "mono";
-  head.appendChild(title); head.appendChild(stat);
-  const grid = document.createElement("div"); grid.className = "grid";
-  panel.appendChild(head); panel.appendChild(grid);
-  $("boards").appendChild(panel);
-  const o = {panel, grid, cells:[], cols:0, stat}; slots[slot] = o; return o;
-}
-function buildGrid(slot, rows, cols){
-  const o = ensureBoard(slot);
-  o.panel.classList.remove("flash-win", "flash-lose");
-  o.grid.style.gridTemplateColumns = `repeat(${cols}, var(--cell))`;
-  o.grid.innerHTML = ""; o.cells = []; o.cols = cols;
-  for (let i=0;i<rows*cols;i++){
-    const d = document.createElement("div");
-    d.className = "cell hidden";
-    o.grid.appendChild(d); o.cells.push(d);
-  }
-}
-function pulse(panel, won){
-  panel.classList.remove("flash-win", "flash-lose");
-  void panel.offsetWidth;  // reflow to restart the animation
-  panel.classList.add(won ? "flash-win" : "flash-lose");
-}
-function renderBoard(slot, cells, last){
-  const o = slots[slot]; if (!o) return;
-  for (let i=0;i<cells.length;i++){
-    const {cls,txt} = cellView(cells[i]);
-    const el = o.cells[i]; if (!el) continue;
-    el.className = "cell " + cls + (i===last ? " last" : "");
-    el.textContent = txt;
-  }
-}
-function removeBoard(slot){ const o = slots[slot]; if (o){ o.panel.remove(); delete slots[slot]; } }
-function pruneBoards(n){ for (const s of Object.keys(slots)) if (+s >= n) removeBoard(+s); }
-function syncParallelOptions(maxN){
-  const sel = $("parallel");
-  if (sel.options.length === maxN) return;
-  const cur = parseInt(sel.value) || 1;
-  sel.innerHTML = "";
-  for (let i=1;i<=maxN;i++){ const o=document.createElement("option"); o.textContent=i; sel.appendChild(o); }
-  sel.value = Math.min(cur, maxN);
-}
-
-// ---- websocket ----
-function connect(){
-  const ws = new WebSocket(`ws://${location.host}/ws`);
-  ws.onopen = () => $("dot").classList.add("on");
-  ws.onclose = () => { $("dot").classList.remove("on"); setTimeout(connect, 1500); };
-  ws.onmessage = (ev) => {
-    const m = JSON.parse(ev.data);
-    if (m.type === "status") applyStatus(m);
-    else if (m.type === "board_start") buildGrid(m.slot, m.rows, m.cols);
-    else if (m.type === "board") {
-      renderBoard(m.slot, m.cells, m.last);
-      const o = slots[m.slot]; if (o) o.stat.textContent = `${m.move}·${(m.elapsedMs/1000).toFixed(1)}s`;
-    } else if (m.type === "board_result") {
-      const o = slots[m.slot];
-      if (o){
-        o.stat.innerHTML = (m.won?`<span style="color:var(--ok)">W</span>`:`<span style="color:var(--bad)">L</span>`)
-          + ` ${m.moves}·${(m.elapsedMs/1000).toFixed(1)}s`;
-        pulse(o.panel, m.won);
-      }
-    } else if (m.type === "board_remove") removeBoard(m.slot);
-  };
-}
-connect();
-
-let editing = false;
-["lr","batch","train_freq","eps_end"].forEach(id => {
-  $(id).addEventListener("focus", () => editing = true);
-  $(id).addEventListener("blur", () => editing = false);
-});
-
-function applyStatus(s){
-  $("count").textContent = (s.cumulative_episodes ?? 0).toLocaleString();
-  const st = s.status || "idle";
-  $("train_status").className = "badge " + st; $("train_status").textContent = st.toUpperCase();
-  $("m_status").textContent = st;
-  $("m_since").textContent = (s.trained_since_creation ?? 0).toLocaleString();
-  $("btn_pause").textContent = (st === "paused") ? "resume" : "pause";
-  const L = s.latest || {};
-  $("m_eval").textContent = fmtPct(s.best_eval);
-  $("m_train").textContent = fmtPct(L.train_wr);
-  $("m_loss").textContent = (L.loss==null)?"—":L.loss;
-  $("m_eps").textContent = (L.eps==null)?"—":L.eps;
-  $("m_lr").textContent = (L.lr==null)?"—":L.lr;
-  $("m_sps").textContent = (L.sps==null)?"—":L.sps;
-  // config inputs (don't clobber while editing)
-  if (!editing && s.config){
-    if ($("lr").value==="") $("lr").value = s.config.lr;
-    if ($("batch").value==="") $("batch").value = s.config.batch;
-    if ($("train_freq").value==="") $("train_freq").value = s.config.train_freq;
-    if ($("eps_end").value==="") $("eps_end").value = s.config.eps_end;
-  }
-  // gpu
-  const g = s.gpu;
-  if (g){
-    $("gpu_name").textContent = g.name;
-    $("gpu_util").textContent = g.util_pct + "%";
-    $("gpu_vram").textContent = `${g.vram_used_mb} / ${g.vram_total_mb} MB (${g.vram_pct}%)`;
-    const bar = $("gpu_vram_g"); bar.firstElementChild.style.width = g.vram_pct + "%";
-    $("gpu_temp").textContent = g.temp_c + " °C";
-    $("gpu_clock").textContent = g.clock_mhz + " MHz";
-    $("gpu_u").textContent = g.util_pct + "%";
-    const t = g.temp_c; bar.className = "gauge" + (t>=85?" hot":t>=75?" warm":"");
-  } else { $("gpu_util").textContent = "no GPU / NVML"; }
-  // play selectors
-  if (s.difficulties && $("difficulty").options.length === 0){
-    s.difficulties.forEach(d => { const o=document.createElement("option"); o.value=d; o.textContent=d; $("difficulty").appendChild(o); });
-  }
-  if (s.play){
-    const maxN = (s.max_parallel && s.max_parallel[s.play.difficulty]) || 18;
-    syncParallelOptions(maxN);
-    if (document.activeElement !== $("parallel")) $("parallel").value = s.play.parallel;
-    if (document.activeElement !== $("difficulty")) $("difficulty").value = s.play.difficulty;
-    if (document.activeElement !== $("no_guess")) $("no_guess").checked = !!s.play.no_guess;
-    pruneBoards(s.play.parallel);
-  }
-  drawChart(s.metrics || []);
-  if (s.play_stats) updateWinStats(s.play_stats);
-}
-function updateWinStats(ps){
-  for (const d of ["beginner","intermediate","expert"]){
-    for (const mode of ["std","ng"]){
-      const cell = $(`ws_${mode}_${d}`); if (!cell) continue;
-      const st = ps[d] && ps[d][mode];
-      const g = st ? st.g : 0, w = st ? st.w : 0, l = g - w;
-      const avg = (st && w > 0) ? (st.wms/w/1000).toFixed(3)+"초" : "–";
-      cell.innerHTML = `<span class="mono">W: <b style="color:var(--ok)">${w}</b> / `
-        + `L: <b style="color:var(--bad)">${l}</b> / ${avg}</span>`;
-    }
-  }
-}
-
-async function post(url, body){ try { await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}); } catch(e){} }
-$("btn_pause").onclick = () => post("/api/control", {action: $("btn_pause").textContent==="pause" ? "pause":"resume"});
-$("btn_stop").onclick = () => post("/api/control", {action:"stop"});
-$("btn_start").onclick = () => post("/api/control", {action:"start"});
-$("btn_apply").onclick = () => post("/api/config", {
-  lr:parseFloat($("lr").value), batch:parseInt($("batch").value),
-  train_freq:parseInt($("train_freq").value), eps_end:parseFloat($("eps_end").value)});
-$("btn_reset_hp").onclick = async () => {
-  try {
-    const r = await fetch("/api/config", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({reset:true})});
-    const cfg = await r.json();
-    $("lr").value=cfg.lr; $("batch").value=cfg.batch; $("train_freq").value=cfg.train_freq; $("eps_end").value=cfg.eps_end;
-  } catch(e){}
-};
-$("parallel").onchange = () => post("/api/play", {parallel:parseInt($("parallel").value)});
-$("difficulty").onchange = () => post("/api/play", {difficulty:$("difficulty").value});
-$("no_guess").onchange = () => post("/api/play", {no_guess:$("no_guess").checked});
-
-function fmtK(n){ return n>=1000 ? (n/1000).toFixed(n>=100000?0:1)+"k" : ""+Math.round(n); }
-// Auto-fit a rate axis to the data band (padded, snapped to nice steps, clamped 0..1).
-// Returns [lo, hi, step]; recomputed each draw so the visible window follows the data up.
-function niceRange(vals){
-  vals = vals.filter(v=>v!=null && isFinite(v));
-  if (!vals.length) return [0, 1, 0.25];
-  let mn=Math.min(...vals), mx=Math.max(...vals), r=mx-mn;
-  if (r < 0.04){ const c=(mn+mx)/2; mn=c-0.02; mx=c+0.02; r=mx-mn; }  // min visible band
-  const pad=r*0.18; let lo=mn-pad, hi=mx+pad;
-  const step=[0.005,0.01,0.02,0.025,0.05,0.1,0.2,0.25].find(s=>s>=(hi-lo)/4) || 0.25;
-  lo=Math.max(0, Math.floor(lo/step)*step);
-  hi=Math.min(1, Math.ceil(hi/step)*step);
-  if (hi-lo < step) hi=Math.min(1, lo+step);
-  return [lo, hi, step];
-}
-function pctLabel(v){ const p=v*100; return (Math.abs(p-Math.round(p))<1e-6 ? Math.round(p) : p.toFixed(1))+"%"; }
-function drawChart(series){
-  // x = eval-sample index (time progression); 3 separate graphs.
-  drawMini("chart_eval", series, s=>s.eval_wr, "#4f8cc9", true);   // blue
-  drawMini("chart_train", series, s=>s.train_wr, "#caa23a", true); // yellow
-  drawMini("chart_sessions", series, s=>s.episode, "#43b04a", false); // green (cumulative count)
-}
-function drawMini(id, series, getY, color, isRate){
-  const cv=$(id); if(!cv) return;
-  const ctx=cv.getContext("2d"), W=cv.width, H=cv.height, pad=34;
-  ctx.clearRect(0,0,W,H);
-  ctx.strokeStyle="#1e2630"; ctx.fillStyle="#697078"; ctx.lineWidth=1; ctx.font="10px ui-monospace";
-  const vals = series.map(getY).filter(v=>v!=null);
-  let lo, hi, step;
-  if (isRate){ [lo,hi,step]=niceRange(vals); }
-  else { lo=0; hi=Math.max(1, ...(vals.length?vals:[1])); step=(hi-lo)/2 || 1; }
-  const Y=v=> pad+(H-2*pad)*(1-Math.max(0,Math.min(1,(v-lo)/(hi-lo))));
-  const k=Math.round((hi-lo)/step);
-  for (let i=0;i<=k;i++){
-    const v=lo+i*step, y=Y(v);
-    ctx.beginPath(); ctx.moveTo(pad,y); ctx.lineTo(W-6,y); ctx.stroke();
-    ctx.fillText(isRate ? pctLabel(v) : fmtK(v), 2, y+3);
-  }
-  if (!series.length) return;
-  const n=series.length;
-  const X=i=> pad+(W-pad-6)*(n<=1?0:i/(n-1));
-  ctx.strokeStyle=color; ctx.lineWidth=2; ctx.beginPath();
-  series.forEach((s,i)=>{ const x=X(i), y=Y(getY(s)); i?ctx.lineTo(x,y):ctx.moveTo(x,y); });
-  ctx.stroke();
-  ctx.fillStyle="#697078"; ctx.fillText("ep "+series[0].episode, pad, H-4);
-  const last="ep "+series[n-1].episode; ctx.fillText(last, W-6-ctx.measureText(last).width, H-4);
-}
-
-// ---- zoom: per-second candlestick of eval/train win-rate (persisted, 1s update) ----
-let zoomSeries=null, zoomTimer=null;
-function openZoom(series){
-  zoomSeries=series;
-  $("zoom_title").textContent = (series==="eval"?"eval wins %":"train wins %") + " · 초당 캔들 (lifetime sessions 기반)";
-  $("zoom_overlay").classList.add("on");
-  zoomTick(); if (zoomTimer) clearInterval(zoomTimer); zoomTimer=setInterval(zoomTick,1000);
-}
-function closeZoom(){ $("zoom_overlay").classList.remove("on"); if(zoomTimer){clearInterval(zoomTimer); zoomTimer=null;} }
-async function zoomTick(){ try { const r=await fetch("/api/winrate"); const d=await r.json(); drawCandles(d.history||[]); } catch(e){} }
-function drawCandles(hist){
-  const cv=$("zoom_canvas"), ctx=cv.getContext("2d"), W=cv.width, H=cv.height, pad=54;
-  ctx.clearRect(0,0,W,H);
-  ctx.strokeStyle="#1e2630"; ctx.fillStyle="#697078"; ctx.lineWidth=1; ctx.font="18px ui-monospace";
-  const key = zoomSeries==="eval" ? "e" : "t";
-  const pts = hist.filter(h => h[key]!=null);
-  if (pts.length < 2){ ctx.fillStyle="#697078"; ctx.fillText("데이터 누적 중… 학습이 진행되면 채워집니다.", pad, H/2); return; }
-  const [lo, hi, step] = niceRange(pts.map(p=>p[key]));  // auto-fit to the data band
-  const Y=v=> pad+(H-2*pad)*(1-Math.max(0,Math.min(1,(v-lo)/(hi-lo))));
-  const k=Math.round((hi-lo)/step);
-  for (let i=0;i<=k;i++){
-    const v=lo+i*step, y=Y(v);
-    ctx.beginPath(); ctx.moveTo(pad,y); ctx.lineTo(W-12,y); ctx.stroke();
-    ctx.fillText(pctLabel(v),8,y+6);
-  }
-  const n=pts.length, cw=(W-pad-12)/n;
-  for (let i=1;i<n;i++){
-    const o=pts[i-1][key], c=pts[i][key], up=c>=o, x=pad+(i-0.5)*cw;
-    ctx.strokeStyle=ctx.fillStyle = up?"#43b04a":"#d24b43";
-    ctx.beginPath(); ctx.moveTo(x,Y(Math.max(o,c))); ctx.lineTo(x,Y(Math.min(o,c))); ctx.stroke();
-    const bw=Math.max(1.5,cw*0.6), yo=Y(o), yc=Y(c);
-    ctx.fillRect(x-bw/2, Math.min(yo,yc), bw, Math.max(1.5,Math.abs(yo-yc)));
-  }
-  ctx.fillStyle="#697078"; ctx.fillText("sessions "+pts[0].s, pad, H-18);
-  const last="sessions "+pts[n-1].s; ctx.fillText(last, W-12-ctx.measureText(last).width, H-18);
-}
-document.querySelectorAll(".zoom-btn").forEach(b => b.onclick = () => openZoom(b.dataset.series));
-$("zoom_close").onclick = closeZoom;
+const $=id=>document.getElementById(id), slots={}; let latestStatus=null;
+const fmt=n=>Number(n||0).toLocaleString(), pct=n=>(100*Number(n||0)).toFixed(2)+'%', sec=ms=>ms==null?'-':(ms/1000).toFixed(3)+' s';
+async function post(url,data){const r=await fetch(url,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(data)});if(!r.ok)throw new Error(await r.text());return r.json()}
+function trainPayload(){return {action:'start',difficulty:$('train_diff').value,num_envs:+$('num_envs').value,rollout_steps:+$('rollout_steps').value,batch_size:+$('batch_size').value,learning_rate:+$('learning_rate').value,entropy_coef:+$('entropy_coef').value,eval_every:+$('eval_every').value,checkpoint_every:+$('checkpoint_every').value}}
+$('start').onclick=()=>post('/api/training',trainPayload()).catch(showError);$('pause').onclick=()=>post('/api/training',{action:'pause'}).catch(showError);$('resume').onclick=()=>post('/api/training',{action:'resume'}).catch(showError);$('stop').onclick=()=>post('/api/training',{action:'stop'}).catch(showError);$('apply').onclick=()=>post('/api/config',{learning_rate:+$('learning_rate').value,entropy_coef:+$('entropy_coef').value}).catch(showError);$('play_apply').onclick=()=>post('/api/play',{difficulty:$('play_diff').value,parallel:+$('parallel').value}).catch(showError);
+function showError(e){$('policy_status').textContent=e.message;$('policy_status').className='error'}
+function syncParallel(diff,value){const max={beginner:8,intermediate:4,expert:2}[diff];$('parallel').innerHTML='';for(let i=1;i<=max;i++)$('parallel').add(new Option(i+' BOARDS',i));$('parallel').value=Math.min(value||1,max)}
+$('play_diff').onchange=()=>syncParallel($('play_diff').value,+$('parallel').value);syncParallel('beginner',4);
+function draw(canvas,values,color,percent){const dpr=devicePixelRatio||1,w=canvas.clientWidth,h=canvas.clientHeight;canvas.width=w*dpr;canvas.height=h*dpr;const c=canvas.getContext('2d');c.scale(dpr,dpr);c.clearRect(0,0,w,h);c.strokeStyle='#273238';c.lineWidth=1;c.beginPath();for(let i=0;i<4;i++){let y=6+i*(h-12)/3;c.moveTo(0,y);c.lineTo(w,y)}c.stroke();if(!values.length)return;let lo=Math.min(...values),hi=Math.max(...values);if(percent){const pad=Math.max((hi-lo)*.2,.015);lo=Math.max(0,lo-pad);hi=Math.min(1,hi+pad)}else{const pad=Math.max((hi-lo)*.1,1);lo-=pad;hi+=pad}if(hi<=lo)hi=lo+1;c.strokeStyle=color;c.lineWidth=1.5;c.beginPath();values.forEach((v,i)=>{const x=values.length===1?w/2:i*w/(values.length-1),y=h-6-(v-lo)/(hi-lo)*(h-12);i?c.lineTo(x,y):c.moveTo(x,y)});c.stroke();c.fillStyle='#7e9099';c.font='9px monospace';c.fillText(percent?(hi*100).toFixed(1)+'%':Math.round(hi).toLocaleString(),3,10);c.fillText(percent?(lo*100).toFixed(1)+'%':Math.round(lo).toLocaleString(),3,h-3)}
+function renderStats(stats){$('stats').innerHTML=['beginner','intermediate','expert'].map(d=>{const s=stats[d]||{};return `<div class="stat"><b>${d.toUpperCase()}</b><span>W: ${fmt(s.wins)} / L: ${fmt(s.losses)}</span><span>WR: ${pct(s.win_rate)}</span><span>AVG WIN: ${sec(s.avg_win_ms)}</span></div>`}).join('')}
+function applyStatus(s){latestStatus=s;$('lifetime').textContent=fmt(s.lifetime_sessions);$('curve_lifetime').textContent=fmt(s.lifetime_sessions);const w=s.worker||{},status=w.status||'idle';$('worker_status').textContent=status.toUpperCase();$('worker_dot').className='dot '+status;$('update').textContent=fmt(w.update);$('episodes').textContent=fmt(s.ppo_sessions);$('steps').textContent=fmt(w.global_step);$('loss').textContent=w.loss==null?'-':Number(w.loss).toFixed(5);if(s.config){for(const k of ['difficulty','num_envs','rollout_steps','batch_size','learning_rate','entropy_coef','eval_every','checkpoint_every']){const id=k==='difficulty'?'train_diff':k;if($(id))$(id).value=s.config[k]}}const g=s.gpu||{};$('gpu_name').textContent=g.available?g.name:'unavailable';$('gpu_text').textContent=g.available?`${g.util}% / ${(g.vram_used/1073741824).toFixed(2)} GB / ${g.temperature} C`:'';$('gpu_bar').style.width=g.available?(100*g.vram_used/g.vram_total)+'%':'0';renderStats(s.play_stats||{});$('play_diff').value=s.play.difficulty;syncParallel(s.play.difficulty,s.play.parallel);const p=s.policy||{};$('policy_status').className=p.error?'error':'';$('policy_status').textContent=p.status==='ready'?`READY / ${p.checkpoint_id.slice(0,12)} / EP ${fmt(p.episode)}`:(p.error||'waiting for axial checkpoint');$('policy_path').textContent=p.path||'';const m=s.metrics||[],train=m.map(x=>x.train_win_rate).filter(x=>x!=null),evals=m.filter(x=>x.eval).map(x=>x.eval.win_rate),life=m.map(x=>3253928+Number(x.episodes||0));$('train_wr').textContent=train.length?pct(train.at(-1)):'-';$('eval_wr').textContent=evals.length?pct(evals.at(-1)):'-';draw($('train_chart'),train,'#e9c14b',true);draw($('eval_chart'),evals,'#4ca3ff',true);draw($('life_chart'),life,'#52c77b',false)}
+function ensureBoard(m){let o=slots[m.slot];if(o)return o;const panel=document.createElement('div');panel.className='board-panel';panel.innerHTML='<div class="board-head"></div><div class="grid"></div><div class="board-result">&nbsp;</div>'; $('boards').append(panel);o=slots[m.slot]={panel,head:panel.children[0],grid:panel.children[1],result:panel.children[2],rows:m.rows,cols:m.cols};return o}
+function renderCells(o,cells,last){o.grid.innerHTML='';o.grid.style.gridTemplateColumns=`repeat(${o.cols},var(--cell))`;cells.forEach((v,i)=>{const c=document.createElement('div');c.className='cell';if(v>=0&&v<=8){c.classList.add('open');if(v)c.classList.add('n'+v);c.textContent=v||''}else if(v>=9){c.classList.add('mine');c.textContent=v===10?'X':'*'}if(i===last)c.style.outline='1px solid #fff';o.grid.append(c)})}
+function message(m){if(m.type==='status')applyStatus(m.data);if(m.type==='boards_reset'){$('boards').innerHTML='';for(const k in slots)delete slots[k]}if(m.type==='board_remove'&&slots[m.slot]){slots[m.slot].panel.remove();delete slots[m.slot]}if(m.type==='model_waiting')$('socket').textContent='checkpoint waiting';if(m.type==='board_start'){const o=ensureBoard(m);o.rows=m.rows;o.cols=m.cols;o.panel.className='board-panel';o.head.textContent=`#${m.slot+1} ${m.difficulty.toUpperCase()} / ${m.rows}x${m.cols} / ${m.mines}M`;o.result.innerHTML='&nbsp;';renderCells(o,m.cells)}if(m.type==='board'){const o=slots[m.slot];if(o){o.result.textContent=`${m.move} clicks / ${(m.elapsed_ms/1000).toFixed(3)} s / ${m.cps.toFixed(1)} CPS`;renderCells(o,m.cells,m.last)}}if(m.type==='board_result'){const o=slots[m.slot];if(o){o.panel.className='board-panel';void o.panel.offsetWidth;o.panel.classList.add(m.won?'win':'loss');o.result.textContent=`${m.won?'WIN':'LOSS'} / ${m.moves} clicks / ${(m.elapsed_ms/1000).toFixed(3)} s / ${m.cps.toFixed(1)} CPS`;renderCells(o,m.cells)}renderStats(m.stats)}}
+function connect(){const ws=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws`);ws.onopen=()=>{$('socket').textContent='live'};ws.onmessage=e=>message(JSON.parse(e.data));ws.onclose=()=>{$('socket').textContent='reconnecting';setTimeout(connect,1000)};ws.onerror=()=>ws.close()}connect();fetch('/api/status').then(r=>r.json()).then(applyStatus);addEventListener('resize',()=>latestStatus&&applyStatus(latestStatus));
 </script>
-</body>
-</html>
+</body></html>

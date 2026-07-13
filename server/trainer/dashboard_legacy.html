@@ -1,0 +1,482 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>minesweeper-ai // management</title>
+<style>
+  /* CLI / terminal style: monospace, minimal colour, thin borders, no shadows/gradients/
+     transitions (low paint/RAM). Board keeps classic number/mine colours for readability. */
+  :root {
+    --cell:18px;  /* fixed minesweeper cell size (beginner=min); boards grow with difficulty */
+    --bg:#0a0d10; --panel:#0e1217; --bd:#1e2630; --tx:#c4ccd4; --dim:#697078;
+    --ok:#43b04a; --warn:#caa23a; --bad:#d24b43; --acc:#4f8cc9;
+    --n1:#4f8cc9; --n2:#43b04a; --n3:#d24b43; --n4:#9a6ee0;
+    --n5:#caa23a; --n6:#3bb0bf; --n7:#aeb6bf; --n8:#6b7480;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--tx);
+    font:12px/1.4 ui-monospace,"JetBrains Mono","Cascadia Code",Consolas,monospace; }
+  header { display:flex; align-items:baseline; gap:10px; padding:5px 10px; border-bottom:1px solid var(--bd); }
+  header h1 { font-size:12px; font-weight:600; margin:0; letter-spacing:.5px; }
+  header h1 .dim { color:var(--dim); font-weight:400; }
+  .dot { width:7px; height:7px; background:var(--bad); display:inline-block; }
+  .dot.on { background:var(--ok); }
+  .badge { padding:0 6px; border:1px solid var(--bd); font-size:11px; }
+  .badge.running { color:var(--ok); border-color:var(--ok); }
+  .badge.paused { color:var(--warn); border-color:var(--warn); }
+  .badge.stopped, .badge.idle { color:var(--dim); }
+  .badge.playing { color:var(--acc); border-color:var(--acc); }
+  .badge.won { color:var(--ok); border-color:var(--ok); }
+  .badge.lost { color:var(--bad); border-color:var(--bad); }
+  .count { margin-left:auto; text-align:right; }
+  .count .k { font-size:9px; color:var(--dim); letter-spacing:1px; text-transform:uppercase; }
+  .count .v { font-size:16px; font-weight:700; color:var(--ok); }
+  main { padding:8px; display:grid; grid-template-columns:1.1fr 0.9fr; gap:8px; align-items:start; }
+  .col { display:flex; flex-direction:column; gap:8px; min-width:0; }
+  .cols { display:grid; grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); gap:8px; align-items:start; }
+  @media (max-width:980px){ main { grid-template-columns:1fr; } }
+  .panel { border:1px solid var(--bd); background:var(--panel); }
+  .panel > h2 { margin:0; padding:2px 8px; font-size:10px; font-weight:600; color:var(--dim);
+    text-transform:uppercase; letter-spacing:1.2px; border-bottom:1px solid var(--bd); }
+  .panel > .b { padding:6px 8px; }
+  table.kv { width:100%; border-collapse:collapse; }
+  table.kv td { padding:1.5px 0; }
+  table.kv td.k { color:var(--dim); }
+  table.kv td.v { text-align:right; }
+  .row { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  .row + .row { margin-top:6px; }
+  label.fld { display:flex; flex-direction:column; gap:2px; font-size:10px; color:var(--dim);
+    text-transform:uppercase; letter-spacing:.5px; }
+  input, select, button { font:inherit; color:var(--tx); background:var(--bg); border:1px solid var(--bd); padding:2px 5px; }
+  input[type=number] { width:74px; }
+  button { cursor:pointer; background:#11161c; }
+  button:hover { border-color:var(--acc); color:var(--acc); }
+  .gauge { height:5px; background:#11161c; border:1px solid var(--bd); margin-top:3px; }
+  .gauge > span { display:block; height:100%; background:var(--acc); }
+  .gauge.warm > span { background:var(--warn); }
+  .gauge.hot > span { background:var(--bad); }
+  canvas { width:100%; height:120px; display:block; }
+  .charts { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:8px; }
+  .chart-lbl { font-size:10px; font-weight:700; letter-spacing:.5px; display:block; margin-bottom:1px; }
+  .winstats { display:grid; grid-template-columns:auto repeat(3, minmax(0,1fr)); gap:4px; }
+  .ws-c { padding:4px 3px; border:1px solid var(--bd); text-align:center; font-size:11px; line-height:1.35; }
+  .ws-c .r { font-weight:700; }
+  .ws-h { border:0; color:var(--dim); font-size:9px; text-transform:uppercase; letter-spacing:.5px; align-self:end; }
+  .ws-rl { border:0; color:var(--dim); font-size:9px; text-transform:uppercase; text-align:left; display:flex; align-items:center; }
+  .zoom-btn { font-size:9px; padding:0 4px; line-height:1.5; vertical-align:middle; }
+  #zoom_overlay { display:none; position:fixed; inset:0; z-index:100; padding:18px;
+    background:rgba(8,11,14,.93); flex-direction:column; }
+  #zoom_overlay.on { display:flex; }
+  .zoom-bar { display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; }
+  #zoom_title { font-size:13px; color:var(--tx); }
+  #zoom_canvas { width:100%; flex:1; min-height:0; background:var(--panel); border:1px solid var(--bd); }
+  .hint { font-size:10px; color:var(--dim); margin-top:5px; line-height:1.4; }
+  /* fixed-size boards that wrap; bigger difficulties = physically bigger boards */
+  .boards { display:flex; flex-wrap:wrap; gap:6px; align-items:flex-start; }
+  .board-panel { border:1px solid var(--bd); background:var(--panel); width:fit-content; }
+  .board-panel.flash-win { animation:flash-win .7s ease-out 1; }
+  .board-panel.flash-lose { animation:flash-lose .7s ease-out 1; }
+  @keyframes flash-win { 0%,100% { border-color:var(--bd); } 30% { border-color:var(--ok); } }
+  @keyframes flash-lose { 0%,100% { border-color:var(--bd); } 30% { border-color:var(--bad); } }
+  .board-head { display:flex; justify-content:space-between; align-items:center; gap:6px;
+    padding:2px 5px; height:18px; font-size:10px; color:var(--dim);
+    border-bottom:1px solid var(--bd); white-space:nowrap; overflow:hidden; }
+  .grid { display:grid; gap:1px; width:max-content; padding:3px; }
+  .cell { display:flex; align-items:center; justify-content:center; overflow:hidden; line-height:1;
+    font-weight:700; background:#11161c; width:var(--cell); height:var(--cell); font-size:calc(var(--cell) * 0.6); }
+  .cell.hidden { background:#1b222b; }
+  .cell.open { background:#0a0e12; color:var(--dim); }
+  .cell.n1 { color:var(--n1); } .cell.n2 { color:var(--n2); } .cell.n3 { color:var(--n3); }
+  .cell.n4 { color:var(--n4); } .cell.n5 { color:var(--n5); } .cell.n6 { color:var(--n6); }
+  .cell.n7 { color:var(--n7); } .cell.n8 { color:var(--n8); }
+  .cell.mine { background:#3a2026; color:var(--bad); }
+  .cell.exploded { background:var(--bad); color:#fff; }
+  .cell.last { outline:1px solid var(--acc); outline-offset:-1px; }
+</style>
+</head>
+<body>
+<header>
+  <span class="dot" id="dot"></span>
+  <h1>minesweeper-ai <span class="dim">// management</span></h1>
+  <span class="badge idle" id="train_status">—</span>
+  <span class="count">
+    <span class="k">lifetime sessions trained</span><br />
+    <span class="v" id="count">—</span>
+  </span>
+</header>
+<main>
+  <div class="col">
+  <div class="cols">
+    <section class="panel"><h2>training control</h2><div class="b">
+      <div class="row">
+        <button id="btn_pause">pause</button>
+        <button id="btn_stop">stop</button>
+        <button id="btn_start">start</button>
+      </div>
+      <table class="kv" style="margin-top:6px">
+        <tr><td class="k">status</td><td class="v" id="m_status">—</td></tr>
+        <tr><td class="k">this run</td><td class="v" id="m_since">—</td></tr>
+        <tr><td class="k">eval win%</td><td class="v" id="m_eval" style="color:var(--ok)">—</td></tr>
+        <tr><td class="k">train win%</td><td class="v" id="m_train">—</td></tr>
+        <tr><td class="k">loss</td><td class="v" id="m_loss">—</td></tr>
+        <tr><td class="k">epsilon</td><td class="v" id="m_eps">—</td></tr>
+        <tr><td class="k">lr (decayed)</td><td class="v" id="m_lr">—</td></tr>
+        <tr><td class="k">steps/s</td><td class="v" id="m_sps">—</td></tr>
+      </table>
+    </div></section>
+
+    <section class="panel"><h2>live hyperparameters</h2><div class="b">
+      <div class="row">
+        <label class="fld">lr<input type="number" id="lr" step="0.0001" min="0" /></label>
+        <label class="fld">batch<input type="number" id="batch" step="32" min="8" /></label>
+      </div>
+      <div class="row">
+        <label class="fld">train every<input type="number" id="train_freq" step="1" min="1" /></label>
+        <label class="fld">eps floor<input type="number" id="eps_end" step="0.01" min="0" max="1" /></label>
+      </div>
+      <div class="row">
+        <button id="btn_apply">apply (no restart)</button>
+        <button id="btn_reset_hp">reset defaults</button>
+      </div>
+      <div class="hint">
+        <b>lr</b> 학습률 — 가중치 갱신 보폭(크면 빠르나 불안정). 기본 5e-4<br/>
+        <b>batch</b> 한 번 갱신에 쓰는 표본 수(크면 안정·연산↑). 기본 256<br/>
+        <b>train every</b> 몇 스텝마다 1회 학습(작을수록 자주 갱신). 기본 4<br/>
+        <b>eps floor</b> 탐험(무작위 행동) 확률의 최저값(0=순수 그리디). 기본 0.05
+      </div>
+    </div></section>
+
+    <section class="panel"><h2>gpu monitor · read-only</h2><div class="b">
+      <table class="kv"><tr><td class="k" id="gpu_name">gpu</td><td class="v" id="gpu_util">—</td></tr></table>
+      <div style="font-size:10px; color:var(--dim); margin-top:5px">vram <span id="gpu_vram">—</span></div>
+      <div class="gauge" id="gpu_vram_g"><span style="width:0%"></span></div>
+      <table class="kv" style="margin-top:6px">
+        <tr><td class="k">temp</td><td class="v" id="gpu_temp">—</td></tr>
+        <tr><td class="k">clock</td><td class="v" id="gpu_clock">—</td></tr>
+        <tr><td class="k">util</td><td class="v" id="gpu_u">—</td></tr>
+      </table>
+      <div class="hint">overclock 미지원 (안전·권한) · 읽기전용</div>
+    </div></section>
+  </div>
+
+  <section class="panel"><h2>training curves</h2><div class="b">
+    <div class="charts">
+      <div class="chart-row"><span class="chart-lbl" style="color:var(--acc)">eval wins % <button class="zoom-btn" data-series="eval">⤢</button></span><canvas id="chart_eval" width="440" height="200"></canvas></div>
+      <div class="chart-row"><span class="chart-lbl" style="color:var(--warn)">train wins % <button class="zoom-btn" data-series="train">⤢</button></span><canvas id="chart_train" width="440" height="200"></canvas></div>
+      <div class="chart-row"><span class="chart-lbl" style="color:var(--ok)">lifetime sessions trained</span><canvas id="chart_sessions" width="440" height="200"></canvas></div>
+    </div>
+  </div></section>
+
+  <section class="panel"><h2>play win-rates (solver) · live</h2><div class="b">
+    <div class="winstats">
+      <div class="ws-c ws-h"></div>
+      <div class="ws-c ws-h">beginner</div>
+      <div class="ws-c ws-h">inter</div>
+      <div class="ws-c ws-h">expert</div>
+      <div class="ws-c ws-rl">standard</div>
+      <div class="ws-c" id="ws_std_beginner">–</div>
+      <div class="ws-c" id="ws_std_intermediate">–</div>
+      <div class="ws-c" id="ws_std_expert">–</div>
+      <div class="ws-c ws-rl">NG</div>
+      <div class="ws-c" id="ws_ng_beginner">–</div>
+      <div class="ws-c" id="ws_ng_intermediate">–</div>
+      <div class="ws-c" id="ws_ng_expert">–</div>
+    </div>
+    <div class="hint">각 칸: 승률 % · <b style="color:var(--ok)">W</b>승/<b style="color:var(--bad)">L</b>패 (대시보드 플레이 누적, 실시간).</div>
+  </div></section>
+
+  </div>
+
+  <div class="col">
+  <section class="panel"><h2>play sessions</h2><div class="b">
+    <div class="row">
+      <label class="fld">parallel
+        <select id="parallel">
+          <option>1</option><option>2</option><option>3</option><option>4</option><option>5</option>
+          <option>6</option><option>7</option><option>8</option><option>9</option><option>10</option>
+          <option>11</option><option>12</option><option>13</option><option>14</option><option>15</option>
+          <option>16</option><option>17</option><option>18</option>
+        </select>
+      </label>
+      <label class="fld">difficulty
+        <select id="difficulty">
+          <option value="beginner">beginner 9x9 / 10</option>
+          <option value="intermediate">intermediate 16x16 / 40</option>
+          <option value="expert">expert 30x16 / 99</option>
+        </select>
+      </label>
+      <label class="fld" style="flex-direction:row; align-items:center; gap:5px">
+        <input type="checkbox" id="no_guess" /> NG (no-guess)
+      </label>
+    </div>
+    <div class="hint">NG = 추측 없이 풀리는 보드만 생성 → 솔버가 ~100% 클리어(일관 시연). 끄면 랜덤 보드(표준 승률).</div>
+  </div></section>
+  <div class="boards" id="boards"></div>
+  </div>
+</main>
+<div id="zoom_overlay">
+  <div class="zoom-bar"><span id="zoom_title" class="mono"></span><button id="zoom_close">close</button></div>
+  <canvas id="zoom_canvas" width="1800" height="700"></canvas>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+
+const NUMCLASS = {0:"open",1:"open n1",2:"open n2",3:"open n3",4:"open n4",5:"open n5",6:"open n6",7:"open n7",8:"open n8"};
+function cellView(v){
+  if (v === -1) return {cls:"hidden", txt:""};
+  if (v === -2) return {cls:"mine", txt:"✷"};
+  if (v === -3) return {cls:"exploded", txt:"✸"};
+  if (v === -4) return {cls:"hidden", txt:"⚑"};
+  return {cls:NUMCLASS[v], txt:(v===0?"":String(v))};
+}
+function fmtPct(x){ return (x==null||isNaN(x)) ? "—" : (x*100).toFixed(1)+"%"; }
+
+// ---- play boards ----
+const slots = {};  // slot -> {panel, grid, cells, cols, head, stat}
+function ensureBoard(slot){
+  if (slots[slot]) return slots[slot];
+  const panel = document.createElement("div"); panel.className = "board-panel";
+  const head = document.createElement("div"); head.className = "board-head";
+  const title = document.createElement("span"); title.textContent = "board " + (slot+1);
+  const stat = document.createElement("span"); stat.className = "mono";
+  head.appendChild(title); head.appendChild(stat);
+  const grid = document.createElement("div"); grid.className = "grid";
+  panel.appendChild(head); panel.appendChild(grid);
+  $("boards").appendChild(panel);
+  const o = {panel, grid, cells:[], cols:0, stat}; slots[slot] = o; return o;
+}
+function buildGrid(slot, rows, cols){
+  const o = ensureBoard(slot);
+  o.panel.classList.remove("flash-win", "flash-lose");
+  o.grid.style.gridTemplateColumns = `repeat(${cols}, var(--cell))`;
+  o.grid.innerHTML = ""; o.cells = []; o.cols = cols;
+  for (let i=0;i<rows*cols;i++){
+    const d = document.createElement("div");
+    d.className = "cell hidden";
+    o.grid.appendChild(d); o.cells.push(d);
+  }
+}
+function pulse(panel, won){
+  panel.classList.remove("flash-win", "flash-lose");
+  void panel.offsetWidth;  // reflow to restart the animation
+  panel.classList.add(won ? "flash-win" : "flash-lose");
+}
+function renderBoard(slot, cells, last){
+  const o = slots[slot]; if (!o) return;
+  for (let i=0;i<cells.length;i++){
+    const {cls,txt} = cellView(cells[i]);
+    const el = o.cells[i]; if (!el) continue;
+    el.className = "cell " + cls + (i===last ? " last" : "");
+    el.textContent = txt;
+  }
+}
+function removeBoard(slot){ const o = slots[slot]; if (o){ o.panel.remove(); delete slots[slot]; } }
+function pruneBoards(n){ for (const s of Object.keys(slots)) if (+s >= n) removeBoard(+s); }
+function syncParallelOptions(maxN){
+  const sel = $("parallel");
+  if (sel.options.length === maxN) return;
+  const cur = parseInt(sel.value) || 1;
+  sel.innerHTML = "";
+  for (let i=1;i<=maxN;i++){ const o=document.createElement("option"); o.textContent=i; sel.appendChild(o); }
+  sel.value = Math.min(cur, maxN);
+}
+
+// ---- websocket ----
+function connect(){
+  const ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onopen = () => $("dot").classList.add("on");
+  ws.onclose = () => { $("dot").classList.remove("on"); setTimeout(connect, 1500); };
+  ws.onmessage = (ev) => {
+    const m = JSON.parse(ev.data);
+    if (m.type === "status") applyStatus(m);
+    else if (m.type === "board_start") buildGrid(m.slot, m.rows, m.cols);
+    else if (m.type === "board") {
+      renderBoard(m.slot, m.cells, m.last);
+      const o = slots[m.slot]; if (o) o.stat.textContent = `${m.move}·${(m.elapsedMs/1000).toFixed(1)}s`;
+    } else if (m.type === "board_result") {
+      const o = slots[m.slot];
+      if (o){
+        o.stat.innerHTML = (m.won?`<span style="color:var(--ok)">W</span>`:`<span style="color:var(--bad)">L</span>`)
+          + ` ${m.moves}·${(m.elapsedMs/1000).toFixed(1)}s`;
+        pulse(o.panel, m.won);
+      }
+    } else if (m.type === "board_remove") removeBoard(m.slot);
+  };
+}
+connect();
+
+let editing = false;
+["lr","batch","train_freq","eps_end"].forEach(id => {
+  $(id).addEventListener("focus", () => editing = true);
+  $(id).addEventListener("blur", () => editing = false);
+});
+
+function applyStatus(s){
+  $("count").textContent = (s.cumulative_episodes ?? 0).toLocaleString();
+  const st = s.status || "idle";
+  $("train_status").className = "badge " + st; $("train_status").textContent = st.toUpperCase();
+  $("m_status").textContent = st;
+  $("m_since").textContent = (s.trained_since_creation ?? 0).toLocaleString();
+  $("btn_pause").textContent = (st === "paused") ? "resume" : "pause";
+  const L = s.latest || {};
+  $("m_eval").textContent = fmtPct(s.best_eval);
+  $("m_train").textContent = fmtPct(L.train_wr);
+  $("m_loss").textContent = (L.loss==null)?"—":L.loss;
+  $("m_eps").textContent = (L.eps==null)?"—":L.eps;
+  $("m_lr").textContent = (L.lr==null)?"—":L.lr;
+  $("m_sps").textContent = (L.sps==null)?"—":L.sps;
+  // config inputs (don't clobber while editing)
+  if (!editing && s.config){
+    if ($("lr").value==="") $("lr").value = s.config.lr;
+    if ($("batch").value==="") $("batch").value = s.config.batch;
+    if ($("train_freq").value==="") $("train_freq").value = s.config.train_freq;
+    if ($("eps_end").value==="") $("eps_end").value = s.config.eps_end;
+  }
+  // gpu
+  const g = s.gpu;
+  if (g){
+    $("gpu_name").textContent = g.name;
+    $("gpu_util").textContent = g.util_pct + "%";
+    $("gpu_vram").textContent = `${g.vram_used_mb} / ${g.vram_total_mb} MB (${g.vram_pct}%)`;
+    const bar = $("gpu_vram_g"); bar.firstElementChild.style.width = g.vram_pct + "%";
+    $("gpu_temp").textContent = g.temp_c + " °C";
+    $("gpu_clock").textContent = g.clock_mhz + " MHz";
+    $("gpu_u").textContent = g.util_pct + "%";
+    const t = g.temp_c; bar.className = "gauge" + (t>=85?" hot":t>=75?" warm":"");
+  } else { $("gpu_util").textContent = "no GPU / NVML"; }
+  // play selectors
+  if (s.difficulties && $("difficulty").options.length === 0){
+    s.difficulties.forEach(d => { const o=document.createElement("option"); o.value=d; o.textContent=d; $("difficulty").appendChild(o); });
+  }
+  if (s.play){
+    const maxN = (s.max_parallel && s.max_parallel[s.play.difficulty]) || 18;
+    syncParallelOptions(maxN);
+    if (document.activeElement !== $("parallel")) $("parallel").value = s.play.parallel;
+    if (document.activeElement !== $("difficulty")) $("difficulty").value = s.play.difficulty;
+    if (document.activeElement !== $("no_guess")) $("no_guess").checked = !!s.play.no_guess;
+    pruneBoards(s.play.parallel);
+  }
+  drawChart(s.metrics || []);
+  if (s.play_stats) updateWinStats(s.play_stats);
+}
+function updateWinStats(ps){
+  for (const d of ["beginner","intermediate","expert"]){
+    for (const mode of ["std","ng"]){
+      const cell = $(`ws_${mode}_${d}`); if (!cell) continue;
+      const st = ps[d] && ps[d][mode];
+      const g = st ? st.g : 0, w = st ? st.w : 0, l = g - w;
+      const avg = (st && w > 0) ? (st.wms/w/1000).toFixed(3)+"초" : "–";
+      cell.innerHTML = `<span class="mono">W: <b style="color:var(--ok)">${w}</b> / `
+        + `L: <b style="color:var(--bad)">${l}</b> / ${avg}</span>`;
+    }
+  }
+}
+
+async function post(url, body){ try { await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}); } catch(e){} }
+$("btn_pause").onclick = () => post("/api/control", {action: $("btn_pause").textContent==="pause" ? "pause":"resume"});
+$("btn_stop").onclick = () => post("/api/control", {action:"stop"});
+$("btn_start").onclick = () => post("/api/control", {action:"start"});
+$("btn_apply").onclick = () => post("/api/config", {
+  lr:parseFloat($("lr").value), batch:parseInt($("batch").value),
+  train_freq:parseInt($("train_freq").value), eps_end:parseFloat($("eps_end").value)});
+$("btn_reset_hp").onclick = async () => {
+  try {
+    const r = await fetch("/api/config", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({reset:true})});
+    const cfg = await r.json();
+    $("lr").value=cfg.lr; $("batch").value=cfg.batch; $("train_freq").value=cfg.train_freq; $("eps_end").value=cfg.eps_end;
+  } catch(e){}
+};
+$("parallel").onchange = () => post("/api/play", {parallel:parseInt($("parallel").value)});
+$("difficulty").onchange = () => post("/api/play", {difficulty:$("difficulty").value});
+$("no_guess").onchange = () => post("/api/play", {no_guess:$("no_guess").checked});
+
+function fmtK(n){ return n>=1000 ? (n/1000).toFixed(n>=100000?0:1)+"k" : ""+Math.round(n); }
+// Auto-fit a rate axis to the data band (padded, snapped to nice steps, clamped 0..1).
+// Returns [lo, hi, step]; recomputed each draw so the visible window follows the data up.
+function niceRange(vals){
+  vals = vals.filter(v=>v!=null && isFinite(v));
+  if (!vals.length) return [0, 1, 0.25];
+  let mn=Math.min(...vals), mx=Math.max(...vals), r=mx-mn;
+  if (r < 0.04){ const c=(mn+mx)/2; mn=c-0.02; mx=c+0.02; r=mx-mn; }  // min visible band
+  const pad=r*0.18; let lo=mn-pad, hi=mx+pad;
+  const step=[0.005,0.01,0.02,0.025,0.05,0.1,0.2,0.25].find(s=>s>=(hi-lo)/4) || 0.25;
+  lo=Math.max(0, Math.floor(lo/step)*step);
+  hi=Math.min(1, Math.ceil(hi/step)*step);
+  if (hi-lo < step) hi=Math.min(1, lo+step);
+  return [lo, hi, step];
+}
+function pctLabel(v){ const p=v*100; return (Math.abs(p-Math.round(p))<1e-6 ? Math.round(p) : p.toFixed(1))+"%"; }
+function drawChart(series){
+  // x = eval-sample index (time progression); 3 separate graphs.
+  drawMini("chart_eval", series, s=>s.eval_wr, "#4f8cc9", true);   // blue
+  drawMini("chart_train", series, s=>s.train_wr, "#caa23a", true); // yellow
+  drawMini("chart_sessions", series, s=>s.episode, "#43b04a", false); // green (cumulative count)
+}
+function drawMini(id, series, getY, color, isRate){
+  const cv=$(id); if(!cv) return;
+  const ctx=cv.getContext("2d"), W=cv.width, H=cv.height, pad=34;
+  ctx.clearRect(0,0,W,H);
+  ctx.strokeStyle="#1e2630"; ctx.fillStyle="#697078"; ctx.lineWidth=1; ctx.font="10px ui-monospace";
+  const vals = series.map(getY).filter(v=>v!=null);
+  let lo, hi, step;
+  if (isRate){ [lo,hi,step]=niceRange(vals); }
+  else { lo=0; hi=Math.max(1, ...(vals.length?vals:[1])); step=(hi-lo)/2 || 1; }
+  const Y=v=> pad+(H-2*pad)*(1-Math.max(0,Math.min(1,(v-lo)/(hi-lo))));
+  const k=Math.round((hi-lo)/step);
+  for (let i=0;i<=k;i++){
+    const v=lo+i*step, y=Y(v);
+    ctx.beginPath(); ctx.moveTo(pad,y); ctx.lineTo(W-6,y); ctx.stroke();
+    ctx.fillText(isRate ? pctLabel(v) : fmtK(v), 2, y+3);
+  }
+  if (!series.length) return;
+  const n=series.length;
+  const X=i=> pad+(W-pad-6)*(n<=1?0:i/(n-1));
+  ctx.strokeStyle=color; ctx.lineWidth=2; ctx.beginPath();
+  series.forEach((s,i)=>{ const x=X(i), y=Y(getY(s)); i?ctx.lineTo(x,y):ctx.moveTo(x,y); });
+  ctx.stroke();
+  ctx.fillStyle="#697078"; ctx.fillText("ep "+series[0].episode, pad, H-4);
+  const last="ep "+series[n-1].episode; ctx.fillText(last, W-6-ctx.measureText(last).width, H-4);
+}
+
+// ---- zoom: per-second candlestick of eval/train win-rate (persisted, 1s update) ----
+let zoomSeries=null, zoomTimer=null;
+function openZoom(series){
+  zoomSeries=series;
+  $("zoom_title").textContent = (series==="eval"?"eval wins %":"train wins %") + " · 초당 캔들 (lifetime sessions 기반)";
+  $("zoom_overlay").classList.add("on");
+  zoomTick(); if (zoomTimer) clearInterval(zoomTimer); zoomTimer=setInterval(zoomTick,1000);
+}
+function closeZoom(){ $("zoom_overlay").classList.remove("on"); if(zoomTimer){clearInterval(zoomTimer); zoomTimer=null;} }
+async function zoomTick(){ try { const r=await fetch("/api/winrate"); const d=await r.json(); drawCandles(d.history||[]); } catch(e){} }
+function drawCandles(hist){
+  const cv=$("zoom_canvas"), ctx=cv.getContext("2d"), W=cv.width, H=cv.height, pad=54;
+  ctx.clearRect(0,0,W,H);
+  ctx.strokeStyle="#1e2630"; ctx.fillStyle="#697078"; ctx.lineWidth=1; ctx.font="18px ui-monospace";
+  const key = zoomSeries==="eval" ? "e" : "t";
+  const pts = hist.filter(h => h[key]!=null);
+  if (pts.length < 2){ ctx.fillStyle="#697078"; ctx.fillText("데이터 누적 중… 학습이 진행되면 채워집니다.", pad, H/2); return; }
+  const [lo, hi, step] = niceRange(pts.map(p=>p[key]));  // auto-fit to the data band
+  const Y=v=> pad+(H-2*pad)*(1-Math.max(0,Math.min(1,(v-lo)/(hi-lo))));
+  const k=Math.round((hi-lo)/step);
+  for (let i=0;i<=k;i++){
+    const v=lo+i*step, y=Y(v);
+    ctx.beginPath(); ctx.moveTo(pad,y); ctx.lineTo(W-12,y); ctx.stroke();
+    ctx.fillText(pctLabel(v),8,y+6);
+  }
+  const n=pts.length, cw=(W-pad-12)/n;
+  for (let i=1;i<n;i++){
+    const o=pts[i-1][key], c=pts[i][key], up=c>=o, x=pad+(i-0.5)*cw;
+    ctx.strokeStyle=ctx.fillStyle = up?"#43b04a":"#d24b43";
+    ctx.beginPath(); ctx.moveTo(x,Y(Math.max(o,c))); ctx.lineTo(x,Y(Math.min(o,c))); ctx.stroke();
+    const bw=Math.max(1.5,cw*0.6), yo=Y(o), yc=Y(c);
+    ctx.fillRect(x-bw/2, Math.min(yo,yc), bw, Math.max(1.5,Math.abs(yo-yc)));
+  }
+  ctx.fillStyle="#697078"; ctx.fillText("sessions "+pts[0].s, pad, H-18);
+  const last="sessions "+pts[n-1].s; ctx.fillText(last, W-12-ctx.measureText(last).width, H-18);
+}
+document.querySelectorAll(".zoom-btn").forEach(b => b.onclick = () => openZoom(b.dataset.series));
+$("zoom_close").onclick = closeZoom;
+</script>
+</body>
+</html>
