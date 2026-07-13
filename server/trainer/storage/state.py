@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -18,7 +19,16 @@ def atomic_write_json(path: str | Path, payload: dict[str, Any]) -> None:
             json.dump(payload, handle, sort_keys=True, separators=(",", ":"))
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(tmp, target)
+        # A Windows reader briefly holds a non-delete-sharing handle. Keep the
+        # replace atomic and retry only that bounded sharing violation.
+        for attempt in range(20):
+            try:
+                os.replace(tmp, target)
+                break
+            except PermissionError:
+                if attempt == 19:
+                    raise
+                time.sleep(0.005 * (attempt + 1))
     finally:
         tmp.unlink(missing_ok=True)
 
