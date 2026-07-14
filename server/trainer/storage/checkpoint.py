@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import random
+import time
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
@@ -43,6 +44,20 @@ def _file_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _atomic_replace(source: Path, target: Path, attempts: int = 20) -> None:
+    """Retry only transient Windows sharing violations from checkpoint readers."""
+    delay = 0.01
+    for attempt in range(attempts):
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if attempt + 1 == attempts:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 1.5, 0.1)
+
+
 def _atomic_json(path: Path, payload: dict[str, Any]) -> None:
     tmp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
     try:
@@ -50,7 +65,7 @@ def _atomic_json(path: Path, payload: dict[str, Any]) -> None:
             json.dump(payload, handle, sort_keys=True, separators=(",", ":"))
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(tmp, path)
+        _atomic_replace(tmp, path)
     finally:
         tmp.unlink(missing_ok=True)
 
@@ -85,9 +100,11 @@ def _rng_state() -> dict[str, Any]:
 def _restore_rng(state: dict[str, Any]) -> None:
     random.setstate(state["python"])
     np.random.set_state(state["numpy"])
-    torch.random.set_rng_state(state["torch"])
+    torch.random.set_rng_state(state["torch"].cpu())
     if "cuda" in state and torch.cuda.is_available():
-        torch.cuda.set_rng_state_all(state["cuda"])
+        torch.cuda.set_rng_state_all(
+            [device_state.cpu() for device_state in state["cuda"]]
+        )
 
 
 def save_checkpoint(
@@ -134,7 +151,7 @@ def save_checkpoint(
         with tmp.open("r+b") as handle:
             os.fsync(handle.fileno())
         checksum = _file_sha256(tmp)
-        os.replace(tmp, target)
+        _atomic_replace(tmp, target)
     finally:
         tmp.unlink(missing_ok=True)
 

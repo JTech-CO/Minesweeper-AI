@@ -10,11 +10,14 @@ from trainer.env import DIFFICULTIES
 from trainer.storage import config_hash
 
 Algorithm = Literal["ppo", "counter"]
+Architecture = Literal["axial-v3", "constraint-graph-v4"]
 
 
 @dataclass(frozen=True)
 class ExperimentConfig:
     algorithm: Algorithm = "ppo"
+    architecture: Architecture = "axial-v3"
+    graph_rounds: int = 0
     difficulty: str = "beginner"
     seed: int = 0
     device: str = "cuda"
@@ -37,6 +40,12 @@ class ExperimentConfig:
     def __post_init__(self) -> None:
         if self.algorithm not in {"ppo", "counter"}:
             raise ValueError(f"unsupported algorithm {self.algorithm!r}")
+        if self.architecture not in {"axial-v3", "constraint-graph-v4"}:
+            raise ValueError(f"unsupported architecture {self.architecture!r}")
+        if self.graph_rounds < 0:
+            raise ValueError("graph_rounds must be non-negative")
+        if self.architecture == "constraint-graph-v4" and self.graph_rounds < 1:
+            raise ValueError("constraint-graph-v4 requires graph_rounds >= 1")
         if self.difficulty not in DIFFICULTIES:
             raise ValueError(f"unknown difficulty {self.difficulty!r}")
         if self.seed < 0:

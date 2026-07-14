@@ -1,4 +1,4 @@
-"""Width-128 policy/value network with full-board axial context."""
+"""Policy/value network with axial and visible constraint-graph context."""
 
 from __future__ import annotations
 
@@ -8,6 +8,54 @@ from torch.nn import functional as F
 
 from trainer.encoding_v2 import VALID_CHANNEL
 from trainer.models.policy_value import MASK_VALUE, DilatedResBlock, _groups
+
+
+class ConstraintGraphBlock(nn.Module):
+    """Recurrent clue-to-hidden message passing using only visible board edges."""
+
+    def __init__(self, width: int) -> None:
+        super().__init__()
+        groups = _groups(width)
+        self.hidden_message = nn.Conv2d(width, width, 1)
+        self.clue_update = nn.Sequential(
+            nn.Conv2d(width * 2, width, 1),
+            nn.GroupNorm(groups, width),
+            nn.SiLU(),
+            nn.Conv2d(width, width, 1),
+        )
+        self.clue_message = nn.Conv2d(width, width, 1)
+        self.hidden_update = nn.Sequential(
+            nn.Conv2d(width * 2, width, 1),
+            nn.GroupNorm(groups, width),
+            nn.SiLU(),
+            nn.Conv2d(width, width, 1),
+        )
+        self.clue_scale = nn.Parameter(torch.tensor(0.1))
+        self.hidden_scale = nn.Parameter(torch.tensor(0.1))
+        self.register_buffer("neighbor_kernel", torch.ones(1, 1, 3, 3), persistent=False)
+
+    def _neighbor_mean(self, value: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        channels = value.shape[1]
+        kernel = self.neighbor_kernel.expand(channels, 1, 3, 3)
+        total = F.conv2d(value * mask, kernel, padding=1, groups=channels)
+        count = F.conv2d(mask, self.neighbor_kernel, padding=1).clamp_min(1.0)
+        return total / count
+
+    def forward(
+        self,
+        h: torch.Tensor,
+        hidden: torch.Tensor,
+        clue: torch.Tensor,
+        valid: torch.Tensor,
+    ) -> torch.Tensor:
+        hidden_context = self._neighbor_mean(self.hidden_message(h), hidden)
+        clue_delta = self.clue_update(torch.cat((h, hidden_context), dim=1))
+        h = h + self.clue_scale.tanh() * clue_delta * clue
+
+        clue_context = self._neighbor_mean(self.clue_message(h), clue)
+        hidden_delta = self.hidden_update(torch.cat((h, clue_context), dim=1))
+        h = h + self.hidden_scale.tanh() * hidden_delta * hidden
+        return F.silu(h) * valid
 
 
 class AxialContextBlock(nn.Module):
@@ -76,8 +124,12 @@ class AxialPolicyValueNet(nn.Module):
         width: int = 128,
         blocks: int = 8,
         attention_heads: int = 4,
+        graph_rounds: int = 0,
     ) -> None:
         super().__init__()
+        if graph_rounds < 0:
+            raise ValueError("graph_rounds must be non-negative")
+        self.graph_rounds = graph_rounds
         groups = _groups(width)
         self.stem = nn.Sequential(
             nn.Conv2d(in_channels, width, kernel_size=3, padding=1),
@@ -94,6 +146,7 @@ class AxialPolicyValueNet(nn.Module):
         self.axial = nn.ModuleList(
             AxialContextBlock(width, attention_heads) for _ in attention_points
         )
+        self.constraint_graph = ConstraintGraphBlock(width) if graph_rounds else None
         self.global_proj = nn.Sequential(nn.Conv2d(width, width, 1), nn.SiLU())
         self.policy_head = nn.Conv2d(width, 1, 1)
         self.risk_head = nn.Conv2d(width, 1, 1)
@@ -111,7 +164,12 @@ class AxialPolicyValueNet(nn.Module):
         legal_mask: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         valid = x[:, VALID_CHANNEL : VALID_CHANNEL + 1]
+        hidden = x[:, 0:1] * valid
+        clue = x[:, 1:10].sum(dim=1, keepdim=True).clamp_max(1.0) * valid
         h = self.stem(x) * valid
+        if self.constraint_graph is not None:
+            for _ in range(self.graph_rounds):
+                h = self.constraint_graph(h, hidden, clue, valid)
         attention_index = 0
         for index, block in enumerate(self.blocks):
             h = block(h) * valid

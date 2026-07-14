@@ -22,6 +22,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from trainer.config import ExperimentConfig
 from trainer.encoding_v3 import NUM_CHANNELS_V3, encode_v3
 from trainer.env import DIFFICULTIES, MinesweeperEnv
+from trainer.models import build_policy_model
 from trainer.models.policy_value_axial import AxialPolicyValueNet
 from trainer.storage import load_checkpoint
 from trainer.storage.state import atomic_write_json, read_json
@@ -107,11 +108,7 @@ class PolicyStore:
             try:
                 payload = torch.load(source, map_location="cpu", weights_only=False)
                 config = payload.get("config", {})
-                model = AxialPolicyValueNet(
-                    NUM_CHANNELS_V3,
-                    int(config.get("width", 128)),
-                    int(config.get("blocks", 8)),
-                )
+                model = build_policy_model(config | {"input_channels": NUM_CHANNELS_V3})
                 _, manifest = load_checkpoint(source, model=model, map_location="cpu")
                 model.eval()
                 self.model = model

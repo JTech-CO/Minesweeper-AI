@@ -14,6 +14,8 @@ def test_config_validation_and_stable_hash():
     assert first.hash == second.hash
     with pytest.raises(ValueError):
         ExperimentConfig(learning_rate=0)
+    with pytest.raises(ValueError):
+        ExperimentConfig(architecture="constraint-graph-v4", graph_rounds=0)
 
 
 def test_detached_worker_survives_controller_recreation(tmp_path):

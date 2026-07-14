@@ -23,8 +23,16 @@ class TorchAxialPolicy:
 
     @torch.no_grad()
     def act(self, state: np.ndarray, legal_mask: np.ndarray) -> int:
-        x = torch.from_numpy(state[None]).to(self.device)
-        legal = torch.from_numpy(legal_mask[None]).to(self.device).bool()
+        return int(self.act_batch(state[None], legal_mask[None])[0])
+
+    @torch.no_grad()
+    def act_batch(
+        self,
+        states: np.ndarray,
+        legal_masks: np.ndarray,
+    ) -> np.ndarray:
+        x = torch.from_numpy(states).to(self.device)
+        legal = torch.from_numpy(legal_masks).to(self.device).bool()
         output = self.model(x, legal)
         score = output["policy_logits"]
         if self.risk_weight:
@@ -33,7 +41,7 @@ class TorchAxialPolicy:
             certainty = torch.softmax(output["certainty_logits"], dim=1)
             safe_minus_mine = certainty[:, 1] - certainty[:, 2]
             score = score + self.certainty_weight * safe_minus_mine.flatten(start_dim=1)
-        return int(score.argmax(dim=1).item())
+        return score.argmax(dim=1).cpu().numpy()
 
 
 def evaluate_axial_policy(
@@ -44,22 +52,46 @@ def evaluate_axial_policy(
     *,
     seeds: tuple[int, ...],
     suite_name: str,
+    batch_size: int = 32,
 ) -> EvaluationResult:
+    if batch_size < 1:
+        raise ValueError("batch_size must be positive")
     wins = 0
     total_steps = 0
     center = (rows // 2) * cols + cols // 2
     policy.model.eval()
-    for seed in seeds:
-        env = MinesweeperEnv(rows, cols, mines, seed=seed, first_click_policy="safe-area")
-        env.reset()
-        env.step(center)
-        guard = 0
-        while env.status == "playing" and guard < rows * cols + 5:
-            guard += 1
-            legal = env.legal_action_mask().reshape(rows, cols)
-            env.step(policy.act(encode_v3(env), legal))
-        wins += int(env.status == "won")
-        total_steps += env.steps
+    for start in range(0, len(seeds), batch_size):
+        envs = [
+            MinesweeperEnv(
+                rows,
+                cols,
+                mines,
+                seed=seed,
+                first_click_policy="safe-area",
+            )
+            for seed in seeds[start : start + batch_size]
+        ]
+        for env in envs:
+            env.reset()
+            env.step(center)
+        guards = [0] * len(envs)
+        while True:
+            active = [
+                index
+                for index, env in enumerate(envs)
+                if env.status == "playing" and guards[index] < rows * cols + 5
+            ]
+            if not active:
+                break
+            states = np.stack([encode_v3(envs[index]) for index in active])
+            legal = np.stack(
+                [envs[index].legal_action_mask().reshape(rows, cols) for index in active]
+            )
+            for index, action in zip(active, policy.act_batch(states, legal), strict=True):
+                guards[index] += 1
+                envs[index].step(int(action))
+        wins += sum(env.status == "won" for env in envs)
+        total_steps += sum(env.steps for env in envs)
     games = len(seeds)
     low, high = wilson_interval(wins, games)
     return EvaluationResult(
@@ -73,4 +105,3 @@ def evaluate_axial_policy(
         seed_base=seeds[0],
         opening="center",
     )
-

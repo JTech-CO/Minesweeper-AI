@@ -6,6 +6,7 @@ import numpy as np
 import torch
 from torch import nn
 
+from trainer.storage import checkpoint as checkpoint_module
 from trainer.storage import load_checkpoint, save_checkpoint
 
 
@@ -45,3 +46,25 @@ def test_atomic_checkpoint_round_trip_and_manifest(tmp_path):
     on_disk = json.loads((tmp_path / "run.pt.manifest.json").read_text())
     assert on_disk["checkpoint_id"] == payload["checkpoint_id"]
     assert not list(tmp_path.glob("*.tmp"))
+
+
+def test_atomic_replace_retries_transient_reader_lock(tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    target = tmp_path / "target"
+    source.write_text("new")
+    target.write_text("old")
+    real_replace = checkpoint_module.os.replace
+    calls = 0
+
+    def flaky_replace(src, dst):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise PermissionError("simulated Windows sharing violation")
+        real_replace(src, dst)
+
+    monkeypatch.setattr(checkpoint_module.os, "replace", flaky_replace)
+    monkeypatch.setattr(checkpoint_module.time, "sleep", lambda _delay: None)
+    checkpoint_module._atomic_replace(source, target, attempts=2)
+    assert calls == 2
+    assert target.read_text() == "new"

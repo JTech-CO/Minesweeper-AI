@@ -37,4 +37,11 @@ def read_json(path: str | Path, default: dict[str, Any] | None = None) -> dict[s
     target = Path(path)
     if not target.exists():
         return dict(default or {})
-    return json.loads(target.read_text(encoding="utf-8"))
+    for attempt in range(20):
+        try:
+            return json.loads(target.read_text(encoding="utf-8"))
+        except (FileNotFoundError, PermissionError):
+            if attempt == 19:
+                raise
+            time.sleep(0.005 * (attempt + 1))
+    raise AssertionError("unreachable")

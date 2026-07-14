@@ -19,7 +19,7 @@ from trainer.encoding_v3 import NUM_CHANNELS_V3, encode_v3
 from trainer.env import DIFFICULTIES, MinesweeperEnv
 from trainer.evaluation.axial import TorchAxialPolicy, evaluate_axial_policy
 from trainer.evaluation.suites import get_suite, training_seed
-from trainer.models.policy_value_axial import AxialPolicyValueNet
+from trainer.models import build_policy_model
 from trainer.storage import load_checkpoint, save_checkpoint
 from trainer.storage.state import atomic_write_json, read_json
 
@@ -30,9 +30,9 @@ class PPOBackend:
         self.run_dir = Path(run_dir)
         self.run_dir.mkdir(parents=True, exist_ok=True)
         self.device = torch.device(config.device)
-        self.model = AxialPolicyValueNet(NUM_CHANNELS_V3, config.width, config.blocks).to(
-            self.device
-        )
+        self.model = build_policy_model(
+            config.to_dict() | {"input_channels": NUM_CHANNELS_V3}
+        ).to(self.device)
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(),
             lr=config.learning_rate,
@@ -63,21 +63,23 @@ class PPOBackend:
 
     @property
     def _checkpoint_config(self) -> dict:
-        return self.config.to_dict() | {
-            "architecture": "axial-v3",
-            "input_channels": NUM_CHANNELS_V3,
-        }
+        return self.config.to_dict() | {"input_channels": NUM_CHANNELS_V3}
 
     def _restore_or_bootstrap(self) -> None:
         last = self.run_dir / "last.pt"
         bootstrap = self.run_dir / "bootstrap.pt"
         if not bootstrap.exists():
+            checkpoint_name = (
+                "graph-pretrained.pt"
+                if self.config.architecture == "constraint-graph-v4"
+                else "axial-pretrained.pt"
+            )
             bootstrap = (
                 Path(__file__).resolve().parents[2]
                 / "storage"
                 / "checkpoints"
                 / "m4-r2"
-                / "axial-pretrained.pt"
+                / checkpoint_name
             )
         source = last if last.exists() else bootstrap
         if not source.exists():
