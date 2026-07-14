@@ -42,6 +42,15 @@ def _legacy_lifetime() -> int:
     return int(state.get("cumulative_episodes", 0))
 
 
+def _lifetime_sessions() -> int:
+    total = _legacy_lifetime()
+    runs_root = SERVER_ROOT / "storage" / "runs"
+    for lifetime_path in runs_root.glob("*/lifetime.json"):
+        state = read_json(lifetime_path, {"episodes": 0})
+        total += int(state.get("episodes", 0))
+    return total
+
+
 class PlayStats:
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -201,9 +210,7 @@ def _metrics(limit: int = 600) -> list[dict]:
 def _config() -> dict | None:
     if not CONTROLLER.config_path.exists():
         return None
-    return ExperimentConfig.from_json(
-        CONTROLLER.config_path.read_text(encoding="utf-8")
-    ).to_dict()
+    return ExperimentConfig.from_json(CONTROLLER.config_path.read_text(encoding="utf-8")).to_dict()
 
 
 def _status() -> dict:
@@ -215,7 +222,7 @@ def _status() -> dict:
         "config": _config(),
         "gpu": GPU.snapshot(),
         "metrics": _metrics(),
-        "lifetime_sessions": _legacy_lifetime() + int(lifetime.get("episodes", 0)),
+        "lifetime_sessions": _lifetime_sessions(),
         "ppo_sessions": int(lifetime.get("episodes", 0)),
         "play": dict(PLAY),
         "max_parallel": MAX_PARALLEL,
@@ -249,9 +256,7 @@ async def training(request: Request) -> JSONResponse:
     action = body.get("action")
     if action == "start":
         if CONTROLLER.config_path.exists():
-            config = ExperimentConfig.from_json(
-                CONTROLLER.config_path.read_text(encoding="utf-8")
-            )
+            config = ExperimentConfig.from_json(CONTROLLER.config_path.read_text(encoding="utf-8"))
         else:
             config = ExperimentConfig(
                 algorithm="ppo",
@@ -459,4 +464,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
