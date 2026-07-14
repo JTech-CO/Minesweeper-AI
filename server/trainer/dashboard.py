@@ -25,7 +25,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    os.environ["MSAI_RUN_DIR"] = str(Path(args.run_dir).resolve())
+    run_dir = Path(args.run_dir).resolve()
+    os.environ["MSAI_RUN_DIR"] = str(run_dir)
+    os.environ["MSAI_DASHBOARD_LOG"] = str(run_dir / "dashboard-runtime.err")
     url = f"http://{args.host}:{args.port}"
     print(f"[dashboard] local R3 dashboard: {url}", flush=True)
     if not args.no_open:
@@ -44,6 +46,11 @@ def main() -> None:
 if __name__ == "__main__":
     main()
 else:
+    from trainer.log_rotation import install_rotating_stderr
+
+    if log_path := os.environ.get("MSAI_DASHBOARD_LOG"):
+        install_rotating_stderr(log_path)
+
     from trainer.dashboard_app import app
 
     __all__ = ["app"]

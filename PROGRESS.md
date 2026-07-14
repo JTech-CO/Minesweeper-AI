@@ -126,3 +126,11 @@ M4/M5에서 검증된 constraint-graph checkpoint 계보와 canonical seed gate�
 - TS/Python env 및 encoding parity를 깨지 않는다.
 - `*.pt`, `*.onnx`, `.env`, runtime state를 커밋하지 않는다.
 - 실사이트 자동화와 GPU overclock을 복구하지 않는다.
+
+## 2026-07-15 런타임 저장공간 유지보수
+
+- 대시보드 WebSocket 종료 후 완료된 board task 예외가 회수되지 않아 task가 재생성되고 `dashboard.err`가 무제한 증가하던 원인을 수정했다.
+- 연결 종료 시 자식 task 결과를 감독하고, 모든 status/board task를 cancel+gather하여 예외를 회수한다.
+- 앱 프로세스 stderr를 `dashboard-runtime.err`로 분리하고 파일당 10 MiB, 백업 2개(총 약 30 MiB)로 회전한다.
+- 연결 종료 회귀 테스트와 회전 로그 상한 테스트를 추가했다.
+- 서버 전체 pytest 56 passed, ruff green.

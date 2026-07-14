@@ -328,9 +328,21 @@ async def websocket(websocket: WebSocket) -> None:
     await websocket.accept()
     send_lock = asyncio.Lock()
 
+    class ClientDisconnected(Exception):
+        pass
+
     async def emit(payload: dict) -> None:
-        async with send_lock:
-            await websocket.send_json(payload)
+        try:
+            async with send_lock:
+                await websocket.send_json(payload)
+        except (RuntimeError, WebSocketDisconnect) as exc:
+            raise ClientDisconnected from exc
+
+    async def cancel_all(tasks: list[asyncio.Task]) -> None:
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def status_loop() -> None:
         while True:
@@ -411,10 +423,14 @@ async def websocket(websocket: WebSocket) -> None:
     revision = -1
     try:
         while True:
+            if status_task.done():
+                status_task.result()
+            for task in boards.values():
+                if task.done():
+                    task.result()
             if revision != PLAY["revision"]:
                 revision = int(PLAY["revision"])
-                for task in boards.values():
-                    task.cancel()
+                await cancel_all(list(boards.values()))
                 boards.clear()
                 await emit({"type": "boards_reset"})
             for slot in range(int(PLAY["parallel"])):
@@ -422,16 +438,14 @@ async def websocket(websocket: WebSocket) -> None:
                     boards[slot] = asyncio.create_task(board_loop(slot))
             for slot in list(boards):
                 if slot >= int(PLAY["parallel"]):
-                    boards[slot].cancel()
-                    del boards[slot]
+                    task = boards.pop(slot)
+                    await cancel_all([task])
                     await emit({"type": "board_remove", "slot": slot})
             await asyncio.sleep(0.2)
-    except WebSocketDisconnect:
+    except (ClientDisconnected, WebSocketDisconnect):
         pass
     finally:
-        status_task.cancel()
-        for task in boards.values():
-            task.cancel()
+        await cancel_all([status_task, *boards.values()])
 
 
 def parse_args() -> argparse.Namespace:
