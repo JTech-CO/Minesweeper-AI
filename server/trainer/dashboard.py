@@ -16,7 +16,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8800)
-    parser.add_argument("--run-dir", default=str(server_root / "storage" / "runs" / "m4-r3"))
+    parser.add_argument("--run-dir", default=str(server_root / "storage" / "runs" / "m4-r3-graph"))
     parser.add_argument("--no-open", action="store_true")
     parser.add_argument("--no-reload", action="store_true")
     parser.add_argument("--tag", help=argparse.SUPPRESS)
@@ -47,4 +47,3 @@ else:
     from trainer.dashboard_app import app
 
     __all__ = ["app"]
-
