@@ -8,8 +8,8 @@
 
 M4-R2-B constraint-graph policy가 고정 canonical validation에서 beginner 91.1%,
 intermediate 65.5%, expert 13.6%를 기록해 direct-transfer 게이트를 통과했다.
-해당 checkpoint에서 M4-R3 masked PPO production run을 활성화했고, R3 best는
-독립 beginner validation 915/1,000(91.5%)과 bit-identical 재로드를 통과했다.
+해당 checkpoint에서 M4-R3 masked PPO production run을 update 200까지 완료했고, 최종 R3 best는
+독립 beginner validation 937/1,000(93.7%)과 bit-identical 재로드를 통과했다.
 
 상세 재현 결과와 시도 내역은 `docs/M4_R2_블로커.md`가 단일 출처다.
 
@@ -60,8 +60,8 @@ intermediate 65.5%, expert 13.6%를 기록해 direct-transfer 게이트를 통�
 
 - legal-action masked vector rollout, GAE, clipped PPO, value/risk auxiliary loss.
 - canonical graph checkpoint에서 production run storage/runs/m4-r3-graph 시작.
-- update 20: train win 90.8%, smoke 31/32, loss 0.0596.
-- R3 best independent beginner validation 915/1,000 = 91.5%.
+- update 200: 누적 6,510세션, train win 92.0%, smoke 31/32, loss 0.0541.
+- R3 final best independent beginner validation 937/1,000 = 93.7%, 평균 16.682수.
 - policy/risk/certainty/value tensor의 bit-identical checkpoint 재로드 통과.
 - Windows checkpoint/JSON reader 공유 충돌 bounded retry와 CUDA RNG resume 수정.
 
@@ -91,7 +91,7 @@ cd server
 ## 다음 작업
 
 M4 checkpoint와 evaluation 결과를 동결한 뒤 M5 metrics/API/DB 진입 조건을 확인한다.
-M5 시작 전 R3 worker는 현재 graph run을 그대로 resume하며 새 계보를 만들지 않는다.
+R3 worker는 update 200에서 정상 종료됐으며 M5는 검증된 graph checkpoint 계보를 사용한다.
 
 ## 불변식
 
