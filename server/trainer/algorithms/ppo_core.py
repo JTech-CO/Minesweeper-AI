@@ -19,6 +19,7 @@ from trainer.encoding_v3 import NUM_CHANNELS_V3, encode_v3
 from trainer.env import DIFFICULTIES, MinesweeperEnv
 from trainer.evaluation.axial import TorchAxialPolicy, evaluate_axial_policy
 from trainer.evaluation.suites import get_suite, training_seed
+from trainer.events import emit_checkpoint, emit_metric
 from trainer.models import build_policy_model
 from trainer.storage import load_checkpoint, save_checkpoint
 from trainer.storage.state import atomic_write_json, read_json
@@ -282,8 +283,9 @@ class PPOBackend:
 
     def _save(self, evaluation: dict | None = None) -> None:
         extra = {"update": self.update_index, "best_eval": self.best_eval}
-        save_checkpoint(
-            self.run_dir / "last.pt",
+        last_path = self.run_dir / "last.pt"
+        last_manifest = save_checkpoint(
+            last_path,
             model=self.model,
             optimizer=self.optimizer,
             config=self._checkpoint_config,
@@ -295,11 +297,18 @@ class PPOBackend:
             best_eval={"win_rate": self.best_eval},
             extra_state=extra,
         )
+        emit_checkpoint(
+            self.run_dir,
+            source=last_path,
+            manifest=last_manifest,
+            role="last",
+        )
         if evaluation and evaluation["win_rate"] >= self.best_eval:
             self.best_eval = float(evaluation["win_rate"])
             extra["best_eval"] = self.best_eval
-            save_checkpoint(
-                self.run_dir / "best.pt",
+            best_path = self.run_dir / "best.pt"
+            best_manifest = save_checkpoint(
+                best_path,
                 model=self.model,
                 optimizer=self.optimizer,
                 config=self._checkpoint_config,
@@ -311,10 +320,22 @@ class PPOBackend:
                 best_eval=evaluation,
                 extra_state=extra,
             )
+            emit_checkpoint(
+                self.run_dir,
+                source=best_path,
+                manifest=best_manifest,
+                role="best",
+            )
 
     def _record_metrics(self, metrics: dict) -> None:
         with (self.run_dir / "metrics.jsonl").open("a", encoding="utf-8") as handle:
             handle.write(json.dumps(metrics, sort_keys=True) + "\n")
+        emit_metric(
+            self.run_dir,
+            run_id=self.run_id,
+            config=self._checkpoint_config,
+            metrics=metrics,
+        )
 
     def train_update(self) -> dict:
         rollout = self._collect_rollout()

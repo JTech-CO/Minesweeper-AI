@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,6 +19,9 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./msai.db"
     cors_origins: str = "http://localhost:5173"
     model_storage_dir: str = "./storage/models"
+    trainer_run_dir: str | None = None
+    metrics_poll_ms: int = Field(default=50, ge=10)
+    metrics_throttle_ms: int = Field(default=100, ge=50)
     api_token: str | None = None
 
     @property
