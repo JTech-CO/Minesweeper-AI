@@ -28,6 +28,15 @@ def test_metrics_websocket_and_checkpoint_registry(tmp_path) -> None:
         json.dumps({"status": "stopped"}),
         encoding="utf-8",
     )
+    (run_dir / "validation.json").write_text(
+        json.dumps(
+            {
+                "checkpoint_id": "fedcba9876543210fedcba9876543210",
+                "win_rate": 0.937,
+            }
+        ),
+        encoding="utf-8",
+    )
     engine = create_engine(
         f"sqlite:///{tmp_path / 'm5.db'}",
         connect_args={"check_same_thread": False},
@@ -73,7 +82,7 @@ def test_metrics_websocket_and_checkpoint_registry(tmp_path) -> None:
                 emit_checkpoint(
                     run_dir,
                     source=source,
-                    role="best",
+                    role="validated",
                     manifest={
                         "format_version": 2,
                         "run_id": "ppo-integration",
@@ -107,7 +116,7 @@ def test_metrics_websocket_and_checkpoint_registry(tmp_path) -> None:
             assert run.status is RunStatus.done
             assert model.run_id == run.id
             assert model.episode == 40
-            assert model.win_rate == 0.875
+            assert model.win_rate == 0.937
             stored = storage.root / f"{checksum}.pt"
             assert stored.read_bytes() == b"small-test-checkpoint"
             assert model.weights_uri == stored.as_uri()

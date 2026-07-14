@@ -132,6 +132,10 @@ class CheckpointRegistry:
             else Difficulty.custom
         )
         evaluation = manifest.get("current_eval") or manifest.get("best_eval") or {}
+        if event.get("role") == "validated":
+            validation = _read_json(self.run_dir / "validation.json", {})
+            if validation.get("checkpoint_id") == manifest.get("checkpoint_id"):
+                evaluation = validation
         win_rate = float(evaluation.get("win_rate", 0.0))
         created_at = datetime.fromisoformat(str(manifest["created_at"]))
         with self.session_factory() as session:
