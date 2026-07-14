@@ -18,7 +18,7 @@ intermediate 65.5%, expert 13.6%를 기록해 direct-transfer 게이트를 통�
 - [x] M1 core 엔진: 결정론, 첫 클릭 안전, cascade, 3BV, vitest 통과.
 - [x] M2 core solver: false-positive 0, NG solver clear 게이트 통과.
 - [x] M3 server 골격: migration, health, model metadata CRUD 통과.
-- [x] M4 trainer: R0/R1/R2/R3 완료, 48 tests 및 최종 DoD 통과.
+- [x] M4 trainer: R0/R1/R2/R3 완료, 50 tests 및 최종 DoD 통과.
 - [ ] M5 metrics/API/DB.
 - [ ] M6 curriculum.
 - [ ] M7 ONNX/agent parity.
