@@ -134,3 +134,7 @@ M4/M5에서 검증된 constraint-graph checkpoint 계보와 canonical seed gate�
 - 앱 프로세스 stderr를 `dashboard-runtime.err`로 분리하고 파일당 10 MiB, 백업 2개(총 약 30 MiB)로 회전한다.
 - 연결 종료 회귀 테스트와 회전 로그 상한 테스트를 추가했다.
 - 서버 전체 pytest 56 passed, ruff green.
+- 실제 정리에서 대형 `dashboard.err` 7.559 GiB, 재생성 캐시 67.52 MiB, 동일 체크포인트 물리 중복 43.22 MiB를 제거했다.
+- C: 실제 여유 공간은 7.656 GiB 증가했고 프로젝트 논리 용량은 약 3.97 GiB로 감소했다.
+- validated/best/model SHA-256 `d5afc601a312...` 일치를 재확인했고 hardlink 3개가 같은 데이터를 공유한다.
+- 재시작 후 dashboard 8800과 M5 API 8000이 HTTP 200이며, 실제 WebSocket 종료 뒤 3초간 오류 로그 증가량은 0 byte였다.
