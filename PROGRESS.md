@@ -1,15 +1,15 @@
 # Minesweeper AI 진행 상태
 
-**갱신일**: 2026-07-14
-**현재 phase**: M4-R2
-**상태**: BLOCKED - expert direct-transfer 게이트 미통과
+**갱신일**: 2026-07-15
+**현재 phase**: M4 완료
+**상태**: COMPLETE - R0/R1/R2/R3 및 M4 DoD 통과
 
 ## 현재 결론
 
-M4-R0 평가/계보와 M4-R1 durable worker는 완료됐다. M4-R2는 기존 CNN과 승인된
-R2-A axial 모델까지 구현했으나 고급 policy-only canonical validation이 0/500이어서
-게이트를 통과하지 못했다. M4-R3 masked PPO backend와 통합 대시보드는 구현·smoke
-검증됐지만, phase 게이트를 우회하지 않기 위해 실제 PPO 학습 run은 시작하지 않았다.
+M4-R2-B constraint-graph policy가 고정 canonical validation에서 beginner 91.1%,
+intermediate 65.5%, expert 13.6%를 기록해 direct-transfer 게이트를 통과했다.
+해당 checkpoint에서 M4-R3 masked PPO production run을 활성화했고, R3 best는
+독립 beginner validation 915/1,000(91.5%)과 bit-identical 재로드를 통과했다.
 
 상세 재현 결과와 시도 내역은 `docs/M4_R2_블로커.md`가 단일 출처다.
 
@@ -18,7 +18,7 @@ R2-A axial 모델까지 구현했으나 고급 policy-only canonical validation�
 - [x] M1 core 엔진: 결정론, 첫 클릭 안전, cascade, 3BV, vitest 통과.
 - [x] M2 core solver: false-positive 0, NG solver clear 게이트 통과.
 - [x] M3 server 골격: migration, health, model metadata CRUD 통과.
-- [ ] M4 trainer: R0/R1 완료, R2 expert 게이트 blocked, R3 실제 학습 미진입.
+- [x] M4 trainer: R0/R1/R2/R3 완료, 48 tests 및 최종 DoD 통과.
 - [ ] M5 metrics/API/DB.
 - [ ] M6 curriculum.
 - [ ] M7 ONNX/agent parity.
@@ -44,28 +44,26 @@ R2-A axial 모델까지 구현했으나 고급 policy-only canonical validation�
 - 대시보드와 분리된 detached worker process.
 - pause/resume/stop, 상태 파일, process 재접속 lifecycle 테스트.
 
-### M4-R2 표현·교사 사전학습 - blocked
+### M4-R2 표현·교사 사전학습 - 완료
 
-- v2 CNN: beginner 88% / 100, intermediate 26% / 100, expert 0/500.
-- 승인된 R2-A:
-  - visible-only 20채널 constraint-aware encoding.
-  - width 128, residual 8블록, axial row/column attention 2회.
-  - expert hard-state/component-balanced teacher data.
-  - 난이도별 선택 20,000 상태, 12 epoch.
-- R2-A canonical validation:
-  - beginner 181/200 = 90.5%.
-  - intermediate 68/200 = 34.0%.
-  - expert 0/500, 평균 88.778수.
-- risk/certainty head 보정 2종도 별도 smoke suite에서 0/32.
+- R2-A axial 실패 계보는 docs/M4_R2_블로커.md에 보존.
+- R2-B: visible clue↔hidden cell recurrent constraint-graph 4회 + 기존 axial context.
+- 세 난이도를 16x30 valid-mask로 padding해 난이도별 10,000 상태를 mixed batch 학습.
+- 8 epoch teacher loss 3.0923→2.9113, NaN/발산 없음.
+- canonical validation:
+  - beginner 911/1,000 = 91.1%.
+  - intermediate 131/200 = 65.5%.
+  - expert 68/500 = 13.6%, 평균 131.948수.
+- solver 출력은 teacher label에만 사용하고 policy inference 입력에는 사용하지 않음.
 
-### M4-R3 masked PPO - 구현됨, 활성화 금지
+### M4-R3 masked PPO - 완료
 
-- legal-action masked vector rollout.
-- GAE, clipped PPO, value/risk auxiliary loss, potential-based progress reward.
-- 단조 증가 training seed cursor.
-- JSONL metrics, lifetime counter, atomic last/best checkpoint.
-- CPU 소형 backend update/checkpoint smoke test 통과.
-- R2 expert direct-transfer >0 전까지 production run 시작 금지.
+- legal-action masked vector rollout, GAE, clipped PPO, value/risk auxiliary loss.
+- canonical graph checkpoint에서 production run storage/runs/m4-r3-graph 시작.
+- update 20: train win 90.8%, smoke 31/32, loss 0.0596.
+- R3 best independent beginner validation 915/1,000 = 91.5%.
+- policy/risk/certainty/value tensor의 bit-identical checkpoint 재로드 통과.
+- Windows checkpoint/JSON reader 공유 충돌 bounded retry와 CUDA RNG resume 수정.
 
 ## 로컬 통합 대시보드
 
@@ -79,7 +77,7 @@ cd server
 또는 `server/dashboard.bat`를 더블클릭한다. 기본 주소는
 `http://127.0.0.1:8800`이다.
 
-- durable worker start/pause/resume/stop.
+- canonical m4-r3-graph worker start/pause/resume/stop.
 - live learning-rate/entropy 설정.
 - GPU utilization/VRAM/temperature read-only 표시.
 - persistent train/eval/lifetime curves.
@@ -92,11 +90,8 @@ cd server
 
 ## 다음 작업
 
-STOP 규칙에 따라 사용자 결정 전 추가 모델 실험이나 R3 실제 학습을 하지 않는다.
-
-권장 선택지는 B안 constraint-graph policy다. visible clue와 hidden frontier를 이분
-그래프로 만들고 residual mine constraint를 message passing으로 표현한다. solver의
-결론을 inference 입력으로 사용하지 않으며, expert direct-transfer >0 게이트는 유지한다.
+M4 checkpoint와 evaluation 결과를 동결한 뒤 M5 metrics/API/DB 진입 조건을 확인한다.
+M5 시작 전 R3 worker는 현재 graph run을 그대로 resume하며 새 계보를 만들지 않는다.
 
 ## 불변식
 

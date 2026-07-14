@@ -30,7 +30,7 @@ from trainer.worker import WorkerController
 
 SERVER_ROOT = Path(__file__).resolve().parents[1]
 HTML_PATH = Path(__file__).with_name("dashboard.html")
-DEFAULT_RUN_DIR = SERVER_ROOT / "storage" / "runs" / "m4-r3"
+DEFAULT_RUN_DIR = SERVER_ROOT / "storage" / "runs" / "m4-r3-graph"
 RUN_DIR = Path(os.environ.get("MSAI_RUN_DIR", DEFAULT_RUN_DIR)).resolve()
 CONTROLLER = WorkerController(RUN_DIR)
 MAX_PARALLEL = {"beginner": 8, "intermediate": 4, "expert": 2}
@@ -87,6 +87,7 @@ class PolicyStore:
     def _source(self) -> Path | None:
         candidates = [
             self.run_dir / "last.pt",
+            SERVER_ROOT / "storage" / "checkpoints" / "m4-r2" / "graph-pretrained.pt",
             SERVER_ROOT / "storage" / "checkpoints" / "m4-r2" / "axial-pretrained.pt",
         ]
         for path in candidates:
@@ -254,6 +255,8 @@ async def training(request: Request) -> JSONResponse:
         else:
             config = ExperimentConfig(
                 algorithm="ppo",
+                architecture="constraint-graph-v4",
+                graph_rounds=4,
                 difficulty=body.get("difficulty", "beginner"),
                 device=body.get("device", "cuda" if torch.cuda.is_available() else "cpu"),
                 learning_rate=float(body.get("learning_rate", 1e-4)),
