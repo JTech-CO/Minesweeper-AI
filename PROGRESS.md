@@ -1,8 +1,8 @@
 # Minesweeper AI 진행 상태
 
 **갱신일**: 2026-07-15
-**현재 phase**: M4 완료
-**상태**: COMPLETE - R0/R1/R2/R3 및 M4 DoD 통과
+**현재 phase**: M5 완료
+**상태**: COMPLETE - M4 학습 및 M5 metrics/API/DB DoD 통과
 
 ## 현재 결론
 
@@ -19,7 +19,7 @@ intermediate 65.5%, expert 13.6%를 기록해 direct-transfer 게이트를 통�
 - [x] M2 core solver: false-positive 0, NG solver clear 게이트 통과.
 - [x] M3 server 골격: migration, health, model metadata CRUD 통과.
 - [x] M4 trainer: R0/R1/R2/R3 완료, 50 tests 및 최종 DoD 통과.
-- [ ] M5 metrics/API/DB.
+- [x] M5 metrics/API/DB: WS stream, checkpoint file, Model DB row 게이트 통과.
 - [ ] M6 curriculum.
 - [ ] M7 ONNX/agent parity.
 - [ ] M8 web product dashboard.
@@ -88,10 +88,35 @@ cd server
 - 기존 대시보드는 `dashboard_legacy.py/html`로 보존.
 - minesweeper.online 및 실사이트 자동화 없음.
 
+## M5 메트릭 스트림 + 체크포인트 영속화 - 완료
+
+- trainer/events.py: versioned events.jsonl을 fsync append하고 mutable checkpoint를 고유 spool로 snapshot.
+- app/ws/metrics.py: 100ms batch/throttle, 최근 metric replay, bounded client queue.
+- WS payload: episode, train/eval win rate, loss, steps, algorithm, difficulty, exploration 값.
+- PPO는 epsilon-greedy가 아니므로 epsilon 필드는 null, entropy_coef는 별도 전송.
+- app/storage/weights.py: SHA-256 검증, path traversal 차단, content-addressed 저장.
+- 같은 볼륨에서는 hardlink를 사용하고 DB commit 이후 spool을 정리해 물리적 가중치 중복 방지.
+- TrainingRun/Model row는 deterministic UUID로 idempotent upsert.
+- canonical update-200 실제 게이트:
+  - ws://127.0.0.1:8000/ws/metrics에서 update 200, episode 6,510, train 92.0%, smoke eval 96.875% 수신.
+  - Model c0f9352a-b611-4b6e-8c7a-3a10d86c7507, canonical validation 93.7% 기록.
+  - 저장 SHA-256 d5afc601a3127229ab3864398fcfc448504b233a6daa1fb8d89ba7d859155129 일치.
+  - 저장 checkpoint link_count=2로 validated 원본과 물리적 데이터 공유.
+  - server pytest 54 passed, ruff green.
+
+M5 API 실행:
+
+```powershell
+cd server
+$env:TRAINER_RUN_DIR = "storage/runs/m4-r3-graph"
+$env:MODEL_STORAGE_DIR = "storage/models"
+.venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
+```
+
 ## 다음 작업
 
-M4 checkpoint와 evaluation 결과를 동결한 뒤 M5 metrics/API/DB 진입 조건을 확인한다.
-R3 worker는 update 200에서 정상 종료됐으며 M5는 검증된 graph checkpoint 계보를 사용한다.
+M6 curriculum에서 Beginner→Intermediate→Expert 전이와 가중치 승계를 구현한다.
+M4/M5에서 검증된 constraint-graph checkpoint 계보와 canonical seed gate를 그대로 유지한다.
 
 ## 불변식
 
