@@ -4,7 +4,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from trainer.dashboard import app, parse_args
-from trainer.dashboard_app import DEFAULT_RUN_DIR, _lifetime_sessions
+from trainer.dashboard_app import DEFAULT_RUN_DIR, PolicyStore, _lifetime_sessions
 
 
 def test_dashboard_serves_local_policy_control_ui() -> None:
@@ -38,3 +38,10 @@ def test_lifetime_sums_legacy_and_all_preserved_runs(tmp_path, monkeypatch) -> N
     monkeypatch.setattr("trainer.dashboard_app.SERVER_ROOT", tmp_path)
 
     assert _lifetime_sessions() == 118
+
+def test_policy_store_prefers_run_bootstrap_before_global_fallback(tmp_path) -> None:
+    bootstrap = tmp_path / "bootstrap.pt"
+    bootstrap.write_bytes(b"checkpoint")
+    bootstrap.with_suffix(".pt.manifest.json").write_text("{}", encoding="utf-8")
+
+    assert PolicyStore(tmp_path)._source() == bootstrap

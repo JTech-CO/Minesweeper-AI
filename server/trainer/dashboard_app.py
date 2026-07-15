@@ -96,6 +96,7 @@ class PolicyStore:
     def _source(self) -> Path | None:
         candidates = [
             self.run_dir / "last.pt",
+            self.run_dir / "bootstrap.pt",
             SERVER_ROOT / "storage" / "checkpoints" / "m4-r2" / "graph-pretrained.pt",
             SERVER_ROOT / "storage" / "checkpoints" / "m4-r2" / "axial-pretrained.pt",
         ]
