@@ -115,8 +115,8 @@ $env:MODEL_STORAGE_DIR = "storage/models"
 
 ## 다음 작업
 
-docs/M6_Expert_블로커.md의 실패 계보를 기준으로 M6-R4 Expert 전용
-posterior/constraint 정책 아키텍처 변경 승인을 받은 뒤 재개한다.
+docs/M6_Expert_블로커.md의 실패 계보와 docs/M6_R4_설계제안.md를 기준으로
+constraint-posterior-v5 아키텍처 변경 승인을 받은 뒤 재개한다.
 게이트 통과 전에는 M6를 완료 처리하거나 M7로 진행하지 않는다.
 
 ## 불변식

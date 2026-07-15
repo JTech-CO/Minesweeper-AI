@@ -49,4 +49,4 @@ Intermediate와 Expert에서 25%의 환경을 이전 난이도로 구성하도�
 현재 표현과 PPO objective를 유지한 추가 반복은 같은 정체를 반복할 가능성이 높다.
 다음 단계는 Expert 전용 posterior/constraint 표현과 solver distillation을 포함하는
 새 정책 아키텍처가 필요하다. 이는 하네스의 큰 아키텍처 변경에 해당하므로 사용자
-승인 후 별도 M6-R4로 진행한다.
+승인 후 docs/M6_R4_설계제안.md의 고정 계약과 게이트로 별도 M6-R4를 진행한다.
