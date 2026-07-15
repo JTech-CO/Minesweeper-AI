@@ -151,3 +151,12 @@ M6 Expert 최근 500게임 승률과 smoke eval 곡선이 40% 근방으로 수�
 - Expert 첫 smoke: update 100, 3/32 = 9.38%. update 108 기준 학습 계속 실행 중.
 - run 파일은 21개, 체크포인트 논리 용량 101.93 MiB, checkpoint spool 0개, 오류 로그 0 byte.
 - 남은 DoD: Expert 학습 곡선이 약 40% 근방으로 수렴하고 500게임/3회 확인 게이트를 통과해야 한다.
+
+## 2026-07-15 대시보드 플레이 컨트롤 수정
+
+- WebSocket 상태 갱신이 1초마다 사용자가 선택 중인 난이도와 병렬 보드 수를 서버의 이전 값으로 덮어쓰던 결함을 수정했다.
+- 플레이 컨트롤에 dirty/pending 상태를 추가해 선택 중인 값은 보존하고, /api/play 적용 성공 후 서버 응답과 동기화한다.
+- 난이도별 보드 상한은 beginner 8, intermediate 4, expert 2를 유지한다.
+- 실행 중인 8800 대시보드에서 intermediate 3개(16x16), expert 2개(16x30), beginner 6개(9x9) WebSocket 생성을 검증하고 beginner 4개로 복원했다.
+- 대시보드 집중 테스트 7 passed, 관련 Ruff 검사 green.
+- M6 worker는 영향 없이 Expert update 159, episode 1,431에서 계속 실행 중이다.
