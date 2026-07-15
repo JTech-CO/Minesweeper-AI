@@ -10,7 +10,11 @@ from trainer.env import DIFFICULTIES
 from trainer.storage import config_hash
 
 Algorithm = Literal["ppo", "counter"]
-Architecture = Literal["axial-v3", "constraint-graph-v4"]
+Architecture = Literal[
+    "axial-v3",
+    "constraint-graph-v4",
+    "constraint-posterior-v5",
+]
 
 
 @dataclass(frozen=True)
@@ -36,6 +40,10 @@ class ExperimentConfig:
     entropy_coef: float = 0.01
     value_coef: float = 0.5
     max_grad_norm: float = 0.5
+    teacher_kl_coef: float = 0.05
+    mine_aux_coef: float = 0.1
+    mixed_precision: bool = False
+    action_temperature: float = 1.0
     curriculum: bool = False
     curriculum_window: int = 500
     curriculum_confirmations: int = 3
@@ -49,12 +57,16 @@ class ExperimentConfig:
     def __post_init__(self) -> None:
         if self.algorithm not in {"ppo", "counter"}:
             raise ValueError(f"unsupported algorithm {self.algorithm!r}")
-        if self.architecture not in {"axial-v3", "constraint-graph-v4"}:
+        if self.architecture not in {
+            "axial-v3",
+            "constraint-graph-v4",
+            "constraint-posterior-v5",
+        }:
             raise ValueError(f"unsupported architecture {self.architecture!r}")
         if self.graph_rounds < 0:
             raise ValueError("graph_rounds must be non-negative")
-        if self.architecture == "constraint-graph-v4" and self.graph_rounds < 1:
-            raise ValueError("constraint-graph-v4 requires graph_rounds >= 1")
+        if self.architecture.startswith("constraint-") and self.graph_rounds < 1:
+            raise ValueError(f"{self.architecture} requires graph_rounds >= 1")
         if self.difficulty not in DIFFICULTIES:
             raise ValueError(f"unknown difficulty {self.difficulty!r}")
         if self.seed < 0:
@@ -79,6 +91,12 @@ class ExperimentConfig:
             raise ValueError("gae_lambda must be in [0, 1]")
         if not 0 < self.clip_ratio < 1:
             raise ValueError("clip_ratio must be in (0, 1)")
+        if self.teacher_kl_coef < 0 or self.mine_aux_coef < 0:
+            raise ValueError("auxiliary coefficients must be non-negative")
+        if not isinstance(self.mixed_precision, bool):
+            raise ValueError("mixed_precision must be boolean")
+        if self.action_temperature <= 0:
+            raise ValueError("action_temperature must be positive")
 
         if self.curriculum and self.algorithm != "ppo":
             raise ValueError("curriculum requires the PPO algorithm")

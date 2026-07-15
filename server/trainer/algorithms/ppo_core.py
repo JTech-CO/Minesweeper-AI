@@ -36,6 +36,10 @@ class PPOBackend:
             config.to_dict() | {"input_channels": NUM_CHANNELS_V3}
         ).to(self.device)
         self.optimizer = self._new_optimizer()
+        self.use_amp = config.mixed_precision and self.device.type == "cuda"
+        self.scaler = torch.amp.GradScaler("cuda", enabled=self.use_amp)
+        self.teacher_anchor: nn.Module | None = None
+        self.anchor_checkpoint_id: str | None = None
         self.curriculum = (
             CurriculumController(
                 window=config.curriculum_window,
@@ -49,7 +53,7 @@ class PPOBackend:
         )
         self.current_difficulty = config.difficulty
         self.entropy_coef = config.entropy_coef
-        self.risk_coef = 0.1
+        self.action_temperature = config.action_temperature
         self.update_index = 0
         self.best_eval = 0.0
         self.run_id = f"ppo-{uuid.uuid4()}"
@@ -60,6 +64,7 @@ class PPOBackend:
         self.total_episodes = int(lifetime.get("episodes", 0))
         self.total_steps = int(lifetime.get("steps", 0))
         self._restore_or_bootstrap()
+        self._load_teacher_anchor()
         self._configure_envs()
 
     def _new_optimizer(self) -> torch.optim.AdamW:
@@ -68,6 +73,33 @@ class PPOBackend:
             lr=self.config.learning_rate,
             weight_decay=1e-4,
         )
+
+    def _policy_distribution(self, logits: torch.Tensor) -> Categorical:
+        return Categorical(
+            logits=logits.float() / self.action_temperature
+        )
+
+    def _load_teacher_anchor(self) -> None:
+        if self.config.architecture != "constraint-posterior-v5":
+            return
+        bootstrap = self.run_dir / "bootstrap.pt"
+        if not bootstrap.exists():
+            raise FileNotFoundError(
+                "constraint-posterior-v5 requires run_dir/bootstrap.pt"
+            )
+        anchor = build_policy_model(
+            self.config.to_dict() | {"input_channels": NUM_CHANNELS_V3}
+        ).to(self.device)
+        payload, _ = load_checkpoint(
+            bootstrap,
+            model=anchor,
+            map_location=self.device,
+        )
+        anchor.eval()
+        for parameter in anchor.parameters():
+            parameter.requires_grad_(False)
+        self.teacher_anchor = anchor
+        self.anchor_checkpoint_id = str(payload["checkpoint_id"])
 
     def _configure_envs(self) -> None:
         self.rows, self.cols, self.mines = DIFFICULTIES[self.current_difficulty]
@@ -113,7 +145,13 @@ class PPOBackend:
         }
 
     def _extra_state(self) -> dict:
-        extra = {"update": self.update_index, "best_eval": self.best_eval}
+        extra = {
+            "update": self.update_index,
+            "best_eval": self.best_eval,
+            "amp_scaler": self.scaler.state_dict(),
+            "anchor_checkpoint_id": self.anchor_checkpoint_id,
+            "action_temperature": self.action_temperature,
+        }
         if self.curriculum is not None:
             extra.update(
                 {
@@ -155,6 +193,12 @@ class PPOBackend:
             self.update_index = int(extra.get("update", 0))
             self.best_eval = float(extra.get("best_eval", 0.0))
             self.run_id = str(payload.get("run_id") or self.run_id)
+            self.action_temperature = float(
+                extra.get("action_temperature", self.config.action_temperature)
+            )
+            scaler_state = extra.get("amp_scaler")
+            if scaler_state:
+                self.scaler.load_state_dict(scaler_state)
             if self.curriculum is not None and extra.get("curriculum"):
                 self.curriculum.load_state_dict(extra["curriculum"])
                 self.current_difficulty = self.curriculum.difficulty
@@ -215,9 +259,18 @@ class PPOBackend:
         self.model.eval()
         for _ in range(self.config.rollout_steps):
             state, legal = self._batch()
-            with torch.no_grad():
+            with (
+                torch.no_grad(),
+                torch.autocast(
+                    device_type=self.device.type,
+                    dtype=torch.float16,
+                    enabled=self.use_amp,
+                ),
+            ):
                 output = self.model(state, legal)
-                distribution = Categorical(logits=output["policy_logits"])
+                distribution = self._policy_distribution(
+                    output["policy_logits"]
+                )
                 action = distribution.sample()
             mine_target = np.zeros(
                 (self.config.num_envs, self.rows, self.cols), dtype=np.uint8
@@ -254,9 +307,16 @@ class PPOBackend:
             dones.append(torch.tensor(step_dones, dtype=torch.float32))
             mine_targets.append(torch.from_numpy(mine_target.astype(np.float32)))
 
-        with torch.no_grad():
+        with (
+            torch.no_grad(),
+            torch.autocast(
+                device_type=self.device.type,
+                dtype=torch.float16,
+                enabled=self.use_amp,
+            ),
+        ):
             next_state, next_legal = self._batch()
-            next_value = self.model(next_state, next_legal)["value"].cpu()
+            next_value = self.model(next_state, next_legal)["value"].float().cpu()
 
         reward = torch.stack(rewards)
         done = torch.stack(dones)
@@ -285,7 +345,10 @@ class PPOBackend:
             "steps": steps,
         }
 
-    def _optimize(self, rollout: dict[str, torch.Tensor | int]) -> float:
+    def _optimize(
+        self,
+        rollout: dict[str, torch.Tensor | int],
+    ) -> dict[str, float]:
         count = self.config.rollout_steps * self.config.num_envs
         tensors = {}
         for name in (
@@ -301,9 +364,18 @@ class PPOBackend:
             assert isinstance(value, torch.Tensor)
             tensors[name] = value.flatten(end_dim=1)
         advantage = tensors["advantage"]
-        tensors["advantage"] = (advantage - advantage.mean()) / (advantage.std() + 1e-8)
+        tensors["advantage"] = (
+            advantage - advantage.mean()
+        ) / (advantage.std() + 1e-8)
 
-        losses = []
+        totals: dict[str, list[float]] = {
+            "loss": [],
+            "policy_loss": [],
+            "value_loss": [],
+            "mine_loss": [],
+            "teacher_kl": [],
+            "entropy": [],
+        }
         self.model.train()
         for _ in range(4):
             permutation = torch.randperm(count)
@@ -311,43 +383,86 @@ class PPOBackend:
                 indices = permutation[start : start + self.config.batch_size]
                 state = tensors["state"][indices].to(self.device)
                 legal = tensors["legal"][indices].to(self.device)
-                output = self.model(state, legal)
-                distribution = Categorical(logits=output["policy_logits"])
                 action = tensors["action"][indices].to(self.device)
                 old_log_prob = tensors["log_prob"][indices].to(self.device)
-                ratio = torch.exp(distribution.log_prob(action) - old_log_prob)
                 batch_advantage = tensors["advantage"][indices].to(self.device)
-                unclipped = ratio * batch_advantage
-                clipped = torch.clamp(
-                    ratio,
-                    1 - self.config.clip_ratio,
-                    1 + self.config.clip_ratio,
-                ) * batch_advantage
-                policy_loss = -torch.minimum(unclipped, clipped).mean()
-                value_loss = F.mse_loss(
-                    output["value"], tensors["return"][indices].to(self.device)
-                )
-                legal_flat = legal.flatten(start_dim=1).bool()
-                risk_loss = F.binary_cross_entropy_with_logits(
-                    output["risk_logits"][legal_flat],
-                    tensors["mine_target"][indices]
-                    .to(self.device)
-                    .flatten(start_dim=1)[legal_flat],
-                )
-                entropy = distribution.entropy().mean()
-                loss = (
-                    policy_loss
-                    + self.config.value_coef * value_loss
-                    + self.risk_coef * risk_loss
-                    - self.entropy_coef * entropy
-                )
-                self.optimizer.zero_grad(set_to_none=True)
-                loss.backward()
-                nn.utils.clip_grad_norm_(self.model.parameters(), self.config.max_grad_norm)
-                self.optimizer.step()
-                losses.append(float(loss.detach().item()))
-        return float(np.mean(losses))
+                target_return = tensors["return"][indices].to(self.device)
+                target_mine = tensors["mine_target"][indices].to(self.device)
+                with torch.autocast(
+                    device_type=self.device.type,
+                    dtype=torch.float16,
+                    enabled=self.use_amp,
+                ):
+                    output = self.model(state, legal)
+                    policy_logits = output["policy_logits"].float()
+                    distribution = self._policy_distribution(policy_logits)
+                    ratio = torch.exp(
+                        distribution.log_prob(action) - old_log_prob
+                    )
+                    unclipped = ratio * batch_advantage
+                    clipped = torch.clamp(
+                        ratio,
+                        1 - self.config.clip_ratio,
+                        1 + self.config.clip_ratio,
+                    ) * batch_advantage
+                    policy_loss = -torch.minimum(unclipped, clipped).mean()
+                    value_loss = F.mse_loss(
+                        output["value"].float(),
+                        target_return,
+                    )
+                    legal_flat = legal.flatten(start_dim=1).bool()
+                    mine_logits = output.get(
+                        "mine_logits",
+                        output["risk_logits"],
+                    )
+                    mine_loss = F.binary_cross_entropy_with_logits(
+                        mine_logits[legal_flat].float(),
+                        target_mine.flatten(start_dim=1)[legal_flat],
+                    )
+                    teacher_kl = torch.zeros((), device=self.device)
+                    if self.teacher_anchor is not None:
+                        with torch.no_grad():
+                            anchor_output = self.teacher_anchor(state, legal)
+                        teacher_log = F.log_softmax(
+                            anchor_output["policy_logits"].float(),
+                            dim=1,
+                        )
+                        current_log = F.log_softmax(policy_logits, dim=1)
+                        teacher_kl = (
+                            teacher_log.exp() * (teacher_log - current_log)
+                        ).sum(dim=1).mean()
+                    entropy = distribution.entropy().mean()
+                    loss = (
+                        policy_loss
+                        + self.config.value_coef * value_loss
+                        + self.config.mine_aux_coef * mine_loss
+                        + self.config.teacher_kl_coef * teacher_kl
+                        - self.entropy_coef * entropy
+                    )
 
+                self.optimizer.zero_grad(set_to_none=True)
+                self.scaler.scale(loss).backward()
+                self.scaler.unscale_(self.optimizer)
+                nn.utils.clip_grad_norm_(
+                    self.model.parameters(),
+                    self.config.max_grad_norm,
+                )
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
+                values = {
+                    "loss": loss,
+                    "policy_loss": policy_loss,
+                    "value_loss": value_loss,
+                    "mine_loss": mine_loss,
+                    "teacher_kl": teacher_kl,
+                    "entropy": entropy,
+                }
+                for name, value in values.items():
+                    totals[name].append(float(value.detach().item()))
+        return {
+            name: float(np.mean(values))
+            for name, values in totals.items()
+        }
     def _evaluate(self) -> dict:
         suite = get_suite("smoke")
         result = evaluate_axial_policy(
@@ -451,6 +566,7 @@ class PPOBackend:
         self.best_eval = 0.0
         self.outcomes.clear()
         self.optimizer = self._new_optimizer()
+        self.scaler = torch.amp.GradScaler("cuda", enabled=self.use_amp)
         self.entropy_coef = self.config.curriculum_entropy_restart
         self._configure_envs()
 
@@ -485,7 +601,7 @@ class PPOBackend:
         self._update_curriculum_entropy()
         stage_difficulty = self.current_difficulty
         rollout = self._collect_rollout()
-        loss = self._optimize(rollout)
+        optimization = self._optimize(rollout)
         self.update_index += 1
         steps = int(rollout["steps"])
         self.total_steps += steps
@@ -514,12 +630,13 @@ class PPOBackend:
             "curriculum_complete": complete,
             "transition": transition,
             "entropy_coef": self.entropy_coef,
+            "action_temperature": self.action_temperature,
             "rehearsal_envs": sum(
                 difficulty != self.current_difficulty
                 for difficulty in self.env_difficulties
             ),
             "train_win_rate": train_win_rate,
-            "loss": loss,
+            **optimization,
             "eval": evaluation,
         }
         self._record_metrics(metrics)
@@ -531,7 +648,7 @@ class PPOBackend:
             "curriculum_complete": complete,
             "transition": transition,
             "train_win_rate": train_win_rate,
-            "loss": loss,
+            **optimization,
             "complete": complete,
         }
 
@@ -544,6 +661,11 @@ class PPOBackend:
                 group["lr"] = learning_rate
         if "entropy_coef" in values:
             self.entropy_coef = max(0.0, float(values["entropy_coef"]))
+        if "action_temperature" in values:
+            temperature = float(values["action_temperature"])
+            if temperature <= 0:
+                raise ValueError("action_temperature must be positive")
+            self.action_temperature = temperature
 
     def close(self) -> None:
         self._save()

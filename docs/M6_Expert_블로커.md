@@ -1,7 +1,7 @@
 # M6 Expert 수렴 블로커
 
-**갱신일**: 2026-07-15
-**상태**: BLOCKED - Expert 40% 게이트 미달, 아키텍처 변경 승인 필요
+**갱신일**: 2026-07-16
+**상태**: PAUSED - R4-1 통과, R4-2 두 번째 production 재개 대기
 
 ## 증상
 
@@ -37,6 +37,30 @@ Intermediate와 Expert에서 25%의 환경을 이전 난이도로 구성하도�
 집중 테스트 8개와 Ruff는 통과했지만, 이 수정만으로 40% 성능 게이트가
 입증된 것은 아니다.
 
+## M6-R4 실행 계보
+
+R4-1 constraint-posterior-v5 teacher checkpoint는 canonical validation에서
+Beginner 94.4%, Intermediate 72.5%, Expert 27.4%를 기록했다.
+Expert Wilson 95% CI 23.67-31.47%로 기존 R2-B 13.6%를 통계적으로 상회했다.
+
+R4-2 첫 production 시도는 learning rate 2e-5, teacher KL 0.02,
+mine auxiliary 0.05, base entropy 0.003, action temperature 1.0을 사용했다.
+
+- Beginner: update 17, rolling 500게임 89.2%로 승급.
+- Intermediate: update 156, rolling 500게임 60.2%로 승급.
+- Expert: update 200 smoke 3/32 = 9.375%, rolling 2.33%.
+- teacher checkpoint smoke 9/32 = 28.125%보다 크게 악화되어 update 204에서 정상 중단.
+- NaN/OOM은 없었고 실패 원인은 높은 behavior entropy와 약한 anchor 보존으로 판단했다.
+
+실패 가중치는 발행하지 않는다. 두 번째 시도는 action temperature 0.25,
+teacher KL 0.10, learning rate 5e-6, mine auxiliary 0.01,
+base entropy 0.0과 restart entropy 0.001로 teacher 정책 보존과
+near-greedy rollout을 강화한다. 40% 게이트와 seed/game 수는 변경하지 않는다.
+
+두 번째 시도는 Beginner를 update 18, rolling 500게임 94.8%로 통과했다.
+컴퓨터 업데이트 전 update 43, Intermediate stage update 25,
+현재 창 승률 75.19%에서 정상 중단했다. NaN/OOM/worker 오류는 없고
+storage/runs/m6-r4/last.pt와 manifest를 보존했으므로 동일 run에서 재개한다.
 ## 불변식
 
 - Expert 40% 게이트와 seed/game 수를 낮추지 않았다.

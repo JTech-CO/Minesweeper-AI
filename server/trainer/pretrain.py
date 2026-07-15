@@ -8,6 +8,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from torch import nn
 from torch.nn import functional as F
 from torch.utils.data import DataLoader
 
@@ -22,16 +23,19 @@ from trainer.storage import save_checkpoint
 class TeacherPretrainer:
     def __init__(
         self,
-        model: SpatialPolicyValueNet,
+        model: nn.Module,
         *,
         device: torch.device,
         learning_rate: float,
+        mixed_precision: bool = False,
     ) -> None:
         self.model = model.to(device)
         self.device = device
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(), lr=learning_rate, weight_decay=1e-4
         )
+        self.use_amp = mixed_precision and device.type == "cuda"
+        self.scaler = torch.amp.GradScaler("cuda", enabled=self.use_amp)
 
     def train_epoch(self, dataset: TeacherDataset, batch_size: int) -> dict[str, float]:
         loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
@@ -39,6 +43,9 @@ class TeacherPretrainer:
             "loss": 0.0,
             "policy": 0.0,
             "risk": 0.0,
+            "posterior_nll": 0.0,
+            "posterior_brier": 0.0,
+            "mine": 0.0,
             "certainty": 0.0,
             "value": 0.0,
         }
@@ -53,38 +60,69 @@ class TeacherPretrainer:
             target_certainty = batch["certainty_target"].to(self.device)
             target_value = batch["value_target"].to(self.device)
 
-            output = self.model(state, legal)
-            log_policy = F.log_softmax(output["policy_logits"], dim=1)
-            policy_loss = -(target_policy.flatten(start_dim=1) * log_policy).sum(dim=1).mean()
+            with torch.autocast(
+                device_type=self.device.type,
+                dtype=torch.float16,
+                enabled=self.use_amp,
+            ):
+                output = self.model(state, legal)
+                log_policy = F.log_softmax(output["policy_logits"], dim=1)
+                policy_loss = -(
+                    target_policy.flatten(start_dim=1) * log_policy
+                ).sum(dim=1).mean()
 
-            legal_flat = legal.flatten(start_dim=1)
-            risk_logits = output["risk_logits"][legal_flat]
-            risk_target = target_risk.flatten(start_dim=1)[legal_flat]
-            mine_target = target_mine.flatten(start_dim=1)[legal_flat]
-            risk_loss = F.binary_cross_entropy_with_logits(risk_logits, risk_target)
-            mine_loss = F.binary_cross_entropy_with_logits(risk_logits, mine_target)
-            certainty_loss = F.cross_entropy(
-                output["certainty_logits"],
-                target_certainty,
-                ignore_index=-100,
-            )
-            value_loss = F.mse_loss(output["value"], target_value)
-            loss = (
-                policy_loss
-                + risk_loss
-                + 0.25 * mine_loss
-                + 0.25 * certainty_loss
-                + 0.1 * value_loss
-            )
+                legal_flat = legal.flatten(start_dim=1)
+                posterior_logits = output.get(
+                    "posterior_logits",
+                    output["risk_logits"],
+                )[legal_flat]
+                risk_target = target_risk.flatten(start_dim=1)[legal_flat]
+                mine_target = target_mine.flatten(start_dim=1)[legal_flat]
+                posterior_nll = F.binary_cross_entropy_with_logits(
+                    posterior_logits,
+                    risk_target,
+                )
+                posterior_brier = F.mse_loss(
+                    torch.sigmoid(posterior_logits),
+                    risk_target,
+                )
+                if "posterior_logits" in output:
+                    risk_loss = posterior_nll + posterior_brier
+                    mine_logits = output["mine_logits"][legal_flat]
+                else:
+                    risk_loss = posterior_nll
+                    mine_logits = output["risk_logits"][legal_flat]
+                mine_loss = F.binary_cross_entropy_with_logits(
+                    mine_logits,
+                    mine_target,
+                )
+                certainty_loss = F.cross_entropy(
+                    output["certainty_logits"],
+                    target_certainty,
+                    ignore_index=-100,
+                )
+                value_loss = F.mse_loss(output["value"], target_value)
+                loss = (
+                    policy_loss
+                    + risk_loss
+                    + 0.25 * mine_loss
+                    + 0.25 * certainty_loss
+                    + 0.1 * value_loss
+                )
             self.optimizer.zero_grad(set_to_none=True)
-            loss.backward()
+            self.scaler.scale(loss).backward()
+            self.scaler.unscale_(self.optimizer)
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
-            self.optimizer.step()
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
 
             values = {
                 "loss": loss,
                 "policy": policy_loss,
                 "risk": risk_loss,
+                "posterior_nll": posterior_nll,
+                "posterior_brier": posterior_brier,
+                "mine": mine_loss,
                 "certainty": certainty_loss,
                 "value": value_loss,
             }

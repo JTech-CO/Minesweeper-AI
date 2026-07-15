@@ -86,3 +86,5 @@ def test_curriculum_config_preserves_documented_gates() -> None:
 
     with pytest.raises(ValueError):
         ExperimentConfig(curriculum_rehearsal_fraction=1.0)
+    with pytest.raises(ValueError):
+        ExperimentConfig(action_temperature=0.0)

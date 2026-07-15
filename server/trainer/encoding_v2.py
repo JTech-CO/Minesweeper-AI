@@ -16,7 +16,8 @@ def encode_v2(env, target_shape: tuple[int, int] | None = None) -> np.ndarray:
     if out_rows < rows or out_cols < cols:
         raise ValueError("target_shape cannot crop the board")
     out = np.zeros((NUM_CHANNELS_V2, out_rows, out_cols), dtype=np.float32)
-    flat = out[:, :rows, :cols].reshape(NUM_CHANNELS_V2, rows * cols)
+    local = np.zeros((NUM_CHANNELS_V2, rows, cols), dtype=np.float32)
+    flat = local.reshape(NUM_CHANNELS_V2, rows * cols)
 
     hidden = env.revealed == 0
     flat[0, hidden] = 1.0
@@ -33,6 +34,7 @@ def encode_v2(env, target_shape: tuple[int, int] | None = None) -> np.ndarray:
             frontier[cell] = 1.0
     flat[13, :] = frontier
     flat[VALID_CHANNEL, :] = 1.0
+    out[:, :rows, :cols] = local
     return out
 
 

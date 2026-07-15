@@ -1,18 +1,24 @@
 # Minesweeper AI 진행 상태
 
-**갱신일**: 2026-07-15
+**갱신일**: 2026-07-16
 **현재 phase**: M6 진행 중
-**상태**: BLOCKED - Expert 40% 게이트 미달, M6-R4 아키텍처 변경 승인 필요
+**상태**: PAUSED - 컴퓨터 업데이트 전 M6-R4 production curriculum 정상 중단
 
 ## 현재 결론
 
-M4-R2-B constraint-graph policy가 고정 canonical validation에서 beginner 91.1%,
-intermediate 65.5%, expert 13.6%를 기록해 direct-transfer 게이트를 통과했다.
-해당 checkpoint에서 M4-R3 masked PPO production run을 update 200까지 완료했고, 최종 R3 best는
-독립 beginner validation 937/1,000(93.7%)과 bit-identical 재로드를 통과했다.
+M6-R4 constraint-posterior-v5 teacher checkpoint가 고정 canonical validation에서
+beginner 944/1,000(94.4%), intermediate 145/200(72.5%),
+expert 137/500(27.4%, 95% Wilson 23.67-31.47%)를 기록했다.
+Expert CI 하한이 이전 R2-B 13.6%를 상회했고 모든 출력 head의 bit-identical 재로드를 통과했다.
 
-상세 재현 결과와 시도 내역은 `docs/M4_R2_블로커.md`가 단일 출처다.
+두 번째 R4-2 production은 action temperature 0.25, teacher KL 0.10,
+learning rate 5e-6, 분리 mine auxiliary 0.01, AMP, 25% rehearsal을 적용했다.
+Beginner는 update 18에서 rolling 500게임 94.8%로 승급했다. 컴퓨터 업데이트 전
+update 43, Intermediate stage update 25, 현재 창 승률 75.19%에서 오류 없이
+정상 중단했으며 storage/runs/m6-r4/last.pt에서 재개할 수 있다.
 
+M4-R2-B와 기존 M6 실패 계보는 docs/M4_R2_블로커.md,
+docs/M6_Expert_블로커.md가 단일 출처다.
 ## Phase 상태
 
 - [x] M1 core 엔진: 결정론, 첫 클릭 안전, cascade, 3BV, vitest 통과.
@@ -113,11 +119,34 @@ $env:MODEL_STORAGE_DIR = "storage/models"
 .venv\Scripts\python.exe -m uvicorn app.main:app --reload --port 8000
 ```
 
+## M6-R4 constraint-posterior-v5 - 진행 중
+
+- R4-0:
+  - visible-only count-aware factor graph 8회와 posterior/mine/certainty/policy/value 분리 head.
+  - solver inference 비호출, hidden mine-layout 독립, 9x9→16x30 padding 불변, illegal mask.
+  - padded encode_v2의 비연속 reshape 복사 결함 수정.
+- R4-1:
+  - production teacher states: beginner 6,000 / intermediate 10,000 / expert 20,000,
+    Expert 3배 가중, in-memory only.
+  - held-out Expert posterior: Brier 0.002723, NLL 0.403235,
+    certain-safe precision 99.51%.
+  - canonical validation: beginner 94.4%, intermediate 72.5%, expert 27.4%.
+  - checkpoint e02d1109425443e688a89ddc919fcdc1, 모든 출력 bit-identical.
+- R4-2:
+  - frozen anchor checkpoint는 위 teacher checkpoint로 고정.
+  - 첫 시도는 높은 behavior entropy로 Expert 성능이 teacher보다 악화되어 update 204에서 정상 중단.
+  - 두 번째 시도는 action temperature 0.25, teacher KL 0.10,
+    mine auxiliary 0.01, learning rate 5e-6, base entropy 0.0.
+  - Beginner update 18에서 500게임 94.8%로 Intermediate 승급.
+  - update 43, Intermediate stage update 25, 현재 창 승률 75.19%에서
+    컴퓨터 업데이트를 위해 정상 중단. last.pt와 manifest 보존, 오류 없음.
+- 검증: server pytest 75 passed, Ruff green, core vitest 40 passed,
+  TypeScript typecheck 및 workspace lint green.
 ## 다음 작업
 
-docs/M6_Expert_블로커.md의 실패 계보와 docs/M6_R4_설계제안.md를 기준으로
-constraint-posterior-v5 아키텍처 변경 승인을 받은 뒤 재개한다.
-게이트 통과 전에는 M6를 완료 처리하거나 M7로 진행하지 않는다.
+컴퓨터 업데이트 후 storage/runs/m6-r4/last.pt에서 두 번째 R4-2 production을 재개한다.
+Intermediate 60% 게이트와 Expert 40%/500게임/3회 게이트를 통과하기 전에는
+M6를 완료 처리하거나 M7로 진행하지 않는다.
 
 ## 불변식
 
