@@ -1,8 +1,8 @@
 # Minesweeper AI 진행 상태
 
 **갱신일**: 2026-07-15
-**현재 phase**: M5 완료
-**상태**: COMPLETE - M4 학습 및 M5 metrics/API/DB DoD 통과
+**현재 phase**: M6 진행 중
+**상태**: RUNNING - 자동 승급 통과, Expert 40% 수렴 학습 중
 
 ## 현재 결론
 
@@ -115,8 +115,8 @@ $env:MODEL_STORAGE_DIR = "storage/models"
 
 ## 다음 작업
 
-M6 curriculum에서 Beginner→Intermediate→Expert 전이와 가중치 승계를 구현한다.
-M4/M5에서 검증된 constraint-graph checkpoint 계보와 canonical seed gate를 그대로 유지한다.
+M6 Expert 최근 500게임 승률과 smoke eval 곡선이 40% 근방으로 수렴하는지 관찰한다.
+게이트 통과 전에는 M6를 완료 처리하지 않는다.
 
 ## 불변식
 
@@ -138,3 +138,16 @@ M4/M5에서 검증된 constraint-graph checkpoint 계보와 canonical seed gate�
 - C: 실제 여유 공간은 7.656 GiB 증가했고 프로젝트 논리 용량은 약 3.97 GiB로 감소했다.
 - validated/best/model SHA-256 `d5afc601a312...` 일치를 재확인했고 hardlink 3개가 같은 데이터를 공유한다.
 - 재시작 후 dashboard 8800과 M5 API 8000이 HTTP 200이며, 실제 WebSocket 종료 뒤 3초간 오류 로그 증가량은 0 byte였다.
+
+## M6 커리큘럼 학습 - 진행 중
+
+- `CurriculumController`가 최근 500게임 창과 3회 연속 확인으로 0.85/0.60/0.40 게이트를 관리한다.
+- 승급 시 모델 tensor는 bit-identical로 유지하고 환경, optimizer, entropy만 새 단계에 맞게 재설정한다.
+- 체크포인트는 `bootstrap.pt`, `last.pt`, `best.pt` 세 경로만 사용하며 routine 저장은 덮어쓴다. M5 저장소 발행은 curriculum 완료 시 1회로 제한했다.
+- server 전체 pytest 63 passed, ruff green. bootstrap 대시보드 집중 테스트 4 passed.
+- production run: `server/storage/runs/m6-curriculum`, CUDA RTX 4060, 총 5,000 update 상한.
+- Beginner→Intermediate: update 18, episode 578, 최근 500게임 91.4%.
+- Intermediate→Expert: update 91, episode 1,101, 최근 500게임 60.8%.
+- Expert 첫 smoke: update 100, 3/32 = 9.38%. update 108 기준 학습 계속 실행 중.
+- run 파일은 21개, 체크포인트 논리 용량 101.93 MiB, checkpoint spool 0개, 오류 로그 0 byte.
+- 남은 DoD: Expert 학습 곡선이 약 40% 근방으로 수렴하고 500게임/3회 확인 게이트를 통과해야 한다.
