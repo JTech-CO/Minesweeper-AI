@@ -2,7 +2,7 @@
 
 **갱신일**: 2026-07-15
 **현재 phase**: M6 진행 중
-**상태**: RUNNING - 자동 승급 통과, Expert 40% 수렴 학습 중
+**상태**: BLOCKED - Expert 40% 게이트 미달, M6-R4 아키텍처 변경 승인 필요
 
 ## 현재 결론
 
@@ -115,8 +115,9 @@ $env:MODEL_STORAGE_DIR = "storage/models"
 
 ## 다음 작업
 
-M6 Expert 최근 500게임 승률과 smoke eval 곡선이 40% 근방으로 수렴하는지 관찰한다.
-게이트 통과 전에는 M6를 완료 처리하지 않는다.
+docs/M6_Expert_블로커.md의 실패 계보를 기준으로 M6-R4 Expert 전용
+posterior/constraint 정책 아키텍처 변경 승인을 받은 뒤 재개한다.
+게이트 통과 전에는 M6를 완료 처리하거나 M7로 진행하지 않는다.
 
 ## 불변식
 
@@ -160,3 +161,11 @@ M6 Expert 최근 500게임 승률과 smoke eval 곡선이 40% 근방으로 수�
 - 실행 중인 8800 대시보드에서 intermediate 3개(16x16), expert 2개(16x30), beginner 6개(9x9) WebSocket 생성을 검증하고 beginner 4개로 복원했다.
 - 대시보드 집중 테스트 7 passed, 관련 Ruff 검사 green.
 - M6 worker는 영향 없이 Expert update 159, episode 1,431에서 계속 실행 중이다.
+## 2026-07-15 M6 Expert STOP
+
+- production curriculum은 update 4,009에서 정상 종료했다. Expert 최근 500게임 최고 9.6%, smoke 최고 15.625%, 종료 smoke 9.375%로 40% 게이트를 통과하지 못했다.
+- risk 결합, ground-truth safety 보조손실, 새 seed mixed solver-teacher 추가학습을 서로 다른 방법으로 검증했지만 모두 Expert 수렴을 해결하지 못했다.
+- 설계에만 있던 이전 난이도 rehearsal을 mixed-size padded rollout으로 구현했고 현재 난이도 outcome만 게이트에 집계하도록 테스트했다.
+- 실패한 임시 가중치 67.96 MiB와 33.98 MiB를 각각 제거했으며 기존 M6 best/last와 metrics는 보존했다.
+- 상세 증상, 시도, 결과, 가설은 docs/M6_Expert_블로커.md가 단일 출처다.
+- 하네스 STOP 규칙에 따라 M6-R4 아키텍처 변경 승인 전에는 M7로 진행하지 않는다.

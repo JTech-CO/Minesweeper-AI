@@ -29,6 +29,6 @@ class PPOBackend(_PPOBackend):
         self.seed_cursor += 1
         env = self.envs[index]
         env.reset(seed)
-        center = (self.rows // 2) * self.cols + self.cols // 2
+        center = (env.rows // 2) * env.cols + env.cols // 2
         env.step(center)
 

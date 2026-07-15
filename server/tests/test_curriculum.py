@@ -78,7 +78,11 @@ def test_curriculum_config_preserves_documented_gates() -> None:
     assert config.curriculum_beginner_gate == 0.85
     assert config.curriculum_intermediate_gate == 0.60
     assert config.curriculum_expert_target == 0.40
+    assert config.curriculum_rehearsal_fraction == 0.25
     with pytest.raises(ValueError):
         ExperimentConfig(algorithm="counter", curriculum=True)
     with pytest.raises(ValueError):
         ExperimentConfig(difficulty="intermediate", curriculum=True)
+
+    with pytest.raises(ValueError):
+        ExperimentConfig(curriculum_rehearsal_fraction=1.0)

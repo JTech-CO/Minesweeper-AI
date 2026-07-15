@@ -71,14 +71,36 @@ class PPOBackend:
 
     def _configure_envs(self) -> None:
         self.rows, self.cols, self.mines = DIFFICULTIES[self.current_difficulty]
+        stages = list(DIFFICULTIES)
+        previous = stages[: stages.index(self.current_difficulty)]
+        rehearsal_count = 0
+        if (
+            self.curriculum is not None
+            and previous
+            and self.config.curriculum_rehearsal_fraction > 0
+        ):
+            rehearsal_count = min(
+                self.config.num_envs - 1,
+                max(
+                    1,
+                    round(
+                        self.config.num_envs
+                        * self.config.curriculum_rehearsal_fraction
+                    ),
+                ),
+            )
+        self.env_difficulties = [self.current_difficulty] * (
+            self.config.num_envs - rehearsal_count
+        )
+        self.env_difficulties.extend(
+            previous[index % len(previous)] for index in range(rehearsal_count)
+        )
         self.envs = [
             MinesweeperEnv(
-                self.rows,
-                self.cols,
-                self.mines,
+                *DIFFICULTIES[difficulty],
                 first_click_policy="safe-area",
             )
-            for _ in range(self.config.num_envs)
+            for difficulty in self.env_difficulties
         ]
         for index in range(self.config.num_envs):
             self._reset_env(index)
@@ -147,14 +169,20 @@ class PPOBackend:
         seed = training_seed(self.total_episodes + index, run_seed=self.config.seed)
         env = self.envs[index]
         env.reset(seed)
-        center = (self.rows // 2) * self.cols + self.cols // 2
+        center = (env.rows // 2) * env.cols + env.cols // 2
         env.step(center)
 
     def _batch(self) -> tuple[torch.Tensor, torch.Tensor]:
-        states = np.stack([encode_v3(env) for env in self.envs])
-        legal = np.stack(
-            [env.legal_action_mask().reshape(self.rows, self.cols) for env in self.envs]
+        states = np.stack(
+            [encode_v3(env, (self.rows, self.cols)) for env in self.envs]
         )
+        legal = np.zeros(
+            (self.config.num_envs, self.rows, self.cols), dtype=np.uint8
+        )
+        for index, env in enumerate(self.envs):
+            legal[index, : env.rows, : env.cols] = env.legal_action_mask().reshape(
+                env.rows, env.cols
+            )
         return (
             torch.from_numpy(states).to(self.device),
             torch.from_numpy(legal).to(self.device).bool(),
@@ -167,6 +195,10 @@ class PPOBackend:
         if status == "lost":
             return -1.0 + shaping
         return shaping - 0.002
+
+    def _record_outcome(self, index: int, won: int) -> None:
+        if self.env_difficulties[index] == self.current_difficulty:
+            self.outcomes.append(won)
 
     def _collect_rollout(self) -> dict[str, torch.Tensor | int]:
         states = []
@@ -187,21 +219,28 @@ class PPOBackend:
                 output = self.model(state, legal)
                 distribution = Categorical(logits=output["policy_logits"])
                 action = distribution.sample()
-            mine_target = np.stack(
-                [env.mine_layout.reshape(self.rows, self.cols) for env in self.envs]
+            mine_target = np.zeros(
+                (self.config.num_envs, self.rows, self.cols), dtype=np.uint8
             )
+            for index, env in enumerate(self.envs):
+                mine_target[index, : env.rows, : env.cols] = env.mine_layout.reshape(
+                    env.rows, env.cols
+                )
             step_rewards = []
             step_dones = []
             for index, env in enumerate(self.envs):
                 before = env.safe_revealed / max(env.safe_cells, 1)
-                _, _, done, _ = env.step(int(action[index].item()))
+                target_action = int(action[index].item())
+                action_row, action_col = divmod(target_action, self.cols)
+                local_action = action_row * env.cols + action_col
+                _, _, done, _ = env.step(local_action)
                 after = env.safe_revealed / max(env.safe_cells, 1)
                 step_rewards.append(self._reward(before, after, env.status))
                 step_dones.append(float(done))
                 steps += 1
                 if done:
                     won = int(env.status == "won")
-                    self.outcomes.append(won)
+                    self._record_outcome(index, won)
                     completed += 1
                     self.total_episodes += 1
                     self._reset_env(index)
@@ -475,6 +514,10 @@ class PPOBackend:
             "curriculum_complete": complete,
             "transition": transition,
             "entropy_coef": self.entropy_coef,
+            "rehearsal_envs": sum(
+                difficulty != self.current_difficulty
+                for difficulty in self.env_difficulties
+            ),
             "train_win_rate": train_win_rate,
             "loss": loss,
             "eval": evaluation,

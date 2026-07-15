@@ -44,6 +44,7 @@ class ExperimentConfig:
     curriculum_expert_target: float = 0.40
     curriculum_entropy_restart: float = 0.01
     curriculum_entropy_decay_updates: int = 100
+    curriculum_rehearsal_fraction: float = 0.25
 
     def __post_init__(self) -> None:
         if self.algorithm not in {"ppo", "counter"}:
@@ -78,6 +79,7 @@ class ExperimentConfig:
             raise ValueError("gae_lambda must be in [0, 1]")
         if not 0 < self.clip_ratio < 1:
             raise ValueError("clip_ratio must be in (0, 1)")
+
         if self.curriculum and self.algorithm != "ppo":
             raise ValueError("curriculum requires the PPO algorithm")
         if self.curriculum and self.difficulty != "beginner":
@@ -95,6 +97,8 @@ class ExperimentConfig:
                 raise ValueError(f"{name} must be in [0, 1]")
         if self.curriculum_entropy_decay_updates < 1:
             raise ValueError("curriculum_entropy_decay_updates must be positive")
+        if not 0 <= self.curriculum_rehearsal_fraction < 1:
+            raise ValueError("curriculum_rehearsal_fraction must be in [0, 1)")
 
     def to_dict(self) -> dict:
         return asdict(self)
