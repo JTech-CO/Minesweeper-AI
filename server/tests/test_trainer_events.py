@@ -66,3 +66,34 @@ def test_ppo_metric_event_keeps_epsilon_contract_explicit(tmp_path) -> None:
     assert payload["loss"] == 0.1
     assert payload["epsilon"] is None
     assert payload["entropy_coef"] == 0.003
+
+
+def test_curriculum_metric_exposes_stage_state(tmp_path) -> None:
+    event = emit_metric(
+        tmp_path,
+        run_id="curriculum-test",
+        config={
+            "algorithm": "ppo",
+            "difficulty": "beginner",
+            "current_difficulty": "intermediate",
+            "entropy_coef": 0.003,
+        },
+        metrics={
+            "update": 8,
+            "episodes": 500,
+            "steps": 1000,
+            "difficulty": "intermediate",
+            "current_difficulty": "expert",
+            "stage_update": 0,
+            "curriculum_complete": False,
+            "transition": {"type": "promotion", "to": "expert"},
+            "entropy_coef": 0.02,
+        },
+    )
+
+    payload = event["payload"]
+    assert payload["difficulty"] == "intermediate"
+    assert payload["current_difficulty"] == "expert"
+    assert payload["stage_update"] == 0
+    assert payload["transition"] == {"type": "promotion", "to": "expert"}
+    assert payload["entropy_coef"] == 0.02

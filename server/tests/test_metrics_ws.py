@@ -10,7 +10,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
 from app.db.base import Base
-from app.db.models import Model, RunStatus, TrainingRun
+from app.db.models import Difficulty, Model, RunStatus, TrainingRun
 from app.main import app
 from app.storage.weights import CheckpointRegistry, WeightStorage
 from app.ws.metrics import MetricsRuntime
@@ -21,7 +21,7 @@ def test_metrics_websocket_and_checkpoint_registry(tmp_path) -> None:
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     (run_dir / "config.json").write_text(
-        json.dumps({"algorithm": "ppo", "difficulty": "beginner"}),
+        json.dumps({"algorithm": "ppo", "difficulty": "beginner", "curriculum": True}),
         encoding="utf-8",
     )
     (run_dir / "status.json").write_text(
@@ -114,6 +114,7 @@ def test_metrics_websocket_and_checkpoint_registry(tmp_path) -> None:
             assert model is not None
             assert run is not None
             assert run.status is RunStatus.done
+            assert run.difficulty is Difficulty.custom
             assert model.run_id == run.id
             assert model.episode == 40
             assert model.win_rate == 0.937

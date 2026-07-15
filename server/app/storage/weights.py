@@ -127,9 +127,13 @@ class CheckpointRegistry:
         status = _read_json(self.run_dir / "status.json", {"status": "queued"})
         difficulty_value = str(config.get("difficulty", "beginner"))
         difficulty = (
-            Difficulty(difficulty_value)
-            if difficulty_value in Difficulty._value2member_map_
-            else Difficulty.custom
+            Difficulty.custom
+            if config.get("curriculum")
+            else (
+                Difficulty(difficulty_value)
+                if difficulty_value in Difficulty._value2member_map_
+                else Difficulty.custom
+            )
         )
         evaluation = manifest.get("current_eval") or manifest.get("best_eval") or {}
         if event.get("role") == "validated":

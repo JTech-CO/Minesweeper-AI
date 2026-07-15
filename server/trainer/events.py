@@ -49,7 +49,18 @@ def emit_metric(
         "time": float(metrics.get("time", time.time())),
         "payload": {
             "algorithm": config.get("algorithm"),
-            "difficulty": config.get("difficulty"),
+            "difficulty": metrics.get(
+                "difficulty", config.get("current_difficulty", config.get("difficulty"))
+            ),
+            "current_difficulty": metrics.get(
+                "current_difficulty",
+                config.get("current_difficulty", config.get("difficulty")),
+            ),
+            "stage_update": metrics.get("stage_update"),
+            "curriculum_complete": bool(
+                metrics.get("curriculum_complete", False)
+            ),
+            "transition": metrics.get("transition"),
             "update": int(metrics.get("update", 0)),
             "episode": int(metrics.get("episodes", 0)),
             "episodes": int(metrics.get("episodes", 0)),
@@ -62,7 +73,9 @@ def emit_metric(
             "loss": metrics.get("loss"),
             # PPO has entropy exploration, not epsilon-greedy exploration.
             "epsilon": metrics.get("epsilon", metrics.get("eps")),
-            "entropy_coef": config.get("entropy_coef"),
+            "entropy_coef": metrics.get(
+                "entropy_coef", config.get("entropy_coef")
+            ),
         },
     }
     append_event(Path(run_dir) / "events.jsonl", event)

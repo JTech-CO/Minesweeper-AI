@@ -36,6 +36,14 @@ class ExperimentConfig:
     entropy_coef: float = 0.01
     value_coef: float = 0.5
     max_grad_norm: float = 0.5
+    curriculum: bool = False
+    curriculum_window: int = 500
+    curriculum_confirmations: int = 3
+    curriculum_beginner_gate: float = 0.85
+    curriculum_intermediate_gate: float = 0.60
+    curriculum_expert_target: float = 0.40
+    curriculum_entropy_restart: float = 0.01
+    curriculum_entropy_decay_updates: int = 100
 
     def __post_init__(self) -> None:
         if self.algorithm not in {"ppo", "counter"}:
@@ -70,6 +78,23 @@ class ExperimentConfig:
             raise ValueError("gae_lambda must be in [0, 1]")
         if not 0 < self.clip_ratio < 1:
             raise ValueError("clip_ratio must be in (0, 1)")
+        if self.curriculum and self.algorithm != "ppo":
+            raise ValueError("curriculum requires the PPO algorithm")
+        if self.curriculum and self.difficulty != "beginner":
+            raise ValueError("curriculum must start at beginner")
+        if self.curriculum_window < 1 or self.curriculum_confirmations < 1:
+            raise ValueError("curriculum window and confirmations must be positive")
+        for name in (
+            "curriculum_beginner_gate",
+            "curriculum_intermediate_gate",
+            "curriculum_expert_target",
+            "curriculum_entropy_restart",
+        ):
+            value = getattr(self, name)
+            if not 0 <= value <= 1:
+                raise ValueError(f"{name} must be in [0, 1]")
+        if self.curriculum_entropy_decay_updates < 1:
+            raise ValueError("curriculum_entropy_decay_updates must be positive")
 
     def to_dict(self) -> dict:
         return asdict(self)

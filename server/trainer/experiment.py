@@ -34,6 +34,10 @@ class RunState:
     global_step: int = 0
     train_win_rate: float = 0.0
     loss: float | None = None
+    difficulty: str = ""
+    stage_update: int | None = None
+    curriculum_complete: bool = False
+    transition: dict | None = None
     updated_at: float = 0.0
     error: str | None = None
 
@@ -62,6 +66,12 @@ class ExperimentRunner:
             update=int(previous.get("update", 0)),
             episode=int(previous.get("episode", 0)),
             global_step=int(previous.get("global_step", 0)),
+            difficulty=str(previous.get("difficulty", config.difficulty)),
+            stage_update=previous.get("stage_update"),
+            curriculum_complete=bool(
+                previous.get("curriculum_complete", False)
+            ),
+            transition=previous.get("transition"),
         )
 
     def _publish(self) -> None:
@@ -69,6 +79,11 @@ class ExperimentRunner:
         atomic_write_json(self.status_path, asdict(self.state))
 
     def run(self) -> None:
+        if self.state.curriculum_complete:
+            self.state.status = "stopped"
+            self._publish()
+            self.backend.close()
+            return
         self.state.status = "running"
         self._publish()
         try:
@@ -95,7 +110,17 @@ class ExperimentRunner:
                 self.state.train_win_rate = float(metrics.get("train_win_rate", 0.0))
                 loss = metrics.get("loss")
                 self.state.loss = None if loss is None else float(loss)
+                self.state.difficulty = str(
+                    metrics.get("difficulty", self.state.difficulty)
+                )
+                self.state.stage_update = metrics.get("stage_update")
+                self.state.curriculum_complete = bool(
+                    metrics.get("curriculum_complete", False)
+                )
+                self.state.transition = metrics.get("transition")
                 self._publish()
+                if metrics.get("complete"):
+                    break
         except Exception as exc:
             self.state.status = "failed"
             self.state.error = f"{type(exc).__name__}: {exc}"

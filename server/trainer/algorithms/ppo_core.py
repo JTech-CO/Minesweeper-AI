@@ -15,11 +15,12 @@ from torch.distributions import Categorical
 from torch.nn import functional as F
 
 from trainer.config import ExperimentConfig
+from trainer.curriculum import CurriculumController
 from trainer.encoding_v3 import NUM_CHANNELS_V3, encode_v3
 from trainer.env import DIFFICULTIES, MinesweeperEnv
 from trainer.evaluation.axial import TorchAxialPolicy, evaluate_axial_policy
 from trainer.evaluation.suites import get_suite, training_seed
-from trainer.events import emit_checkpoint, emit_metric
+from trainer.events import append_event, emit_checkpoint, emit_metric
 from trainer.models import build_policy_model
 from trainer.storage import load_checkpoint, save_checkpoint
 from trainer.storage.state import atomic_write_json, read_json
@@ -34,37 +35,73 @@ class PPOBackend:
         self.model = build_policy_model(
             config.to_dict() | {"input_channels": NUM_CHANNELS_V3}
         ).to(self.device)
-        self.optimizer = torch.optim.AdamW(
-            self.model.parameters(),
-            lr=config.learning_rate,
-            weight_decay=1e-4,
+        self.optimizer = self._new_optimizer()
+        self.curriculum = (
+            CurriculumController(
+                window=config.curriculum_window,
+                confirmations=config.curriculum_confirmations,
+                beginner_gate=config.curriculum_beginner_gate,
+                intermediate_gate=config.curriculum_intermediate_gate,
+                expert_target=config.curriculum_expert_target,
+            )
+            if config.curriculum
+            else None
         )
+        self.current_difficulty = config.difficulty
         self.entropy_coef = config.entropy_coef
         self.risk_coef = 0.1
         self.update_index = 0
         self.best_eval = 0.0
         self.run_id = f"ppo-{uuid.uuid4()}"
-        self.outcomes: deque[int] = deque(maxlen=500)
+        outcome_window = config.curriculum_window if config.curriculum else 500
+        self.outcomes: deque[int] = deque(maxlen=outcome_window)
         self.lifetime_path = self.run_dir / "lifetime.json"
         lifetime = read_json(self.lifetime_path, {"episodes": 0, "steps": 0})
         self.total_episodes = int(lifetime.get("episodes", 0))
         self.total_steps = int(lifetime.get("steps", 0))
         self._restore_or_bootstrap()
+        self._configure_envs()
 
-        rows, cols, mines = DIFFICULTIES[config.difficulty]
-        self.rows = rows
-        self.cols = cols
-        self.mines = mines
+    def _new_optimizer(self) -> torch.optim.AdamW:
+        return torch.optim.AdamW(
+            self.model.parameters(),
+            lr=self.config.learning_rate,
+            weight_decay=1e-4,
+        )
+
+    def _configure_envs(self) -> None:
+        self.rows, self.cols, self.mines = DIFFICULTIES[self.current_difficulty]
         self.envs = [
-            MinesweeperEnv(rows, cols, mines, first_click_policy="safe-area")
-            for _ in range(config.num_envs)
+            MinesweeperEnv(
+                self.rows,
+                self.cols,
+                self.mines,
+                first_click_policy="safe-area",
+            )
+            for _ in range(self.config.num_envs)
         ]
-        for index in range(config.num_envs):
+        for index in range(self.config.num_envs):
             self._reset_env(index)
 
     @property
     def _checkpoint_config(self) -> dict:
-        return self.config.to_dict() | {"input_channels": NUM_CHANNELS_V3}
+        return self.config.to_dict() | {
+            "input_channels": NUM_CHANNELS_V3,
+            "current_difficulty": self.current_difficulty,
+        }
+
+    def _extra_state(self) -> dict:
+        extra = {"update": self.update_index, "best_eval": self.best_eval}
+        if self.curriculum is not None:
+            extra.update(
+                {
+                    "curriculum": self.curriculum.state_dict(),
+                    "current_difficulty": self.current_difficulty,
+                    "recent_outcomes": list(self.outcomes),
+                    "entropy_coef": self.entropy_coef,
+                }
+            )
+        return extra
 
     def _restore_or_bootstrap(self) -> None:
         last = self.run_dir / "last.pt"
@@ -92,9 +129,19 @@ class PPOBackend:
             map_location=self.device,
         )
         if source == last:
-            self.update_index = int(payload.get("extra_state", {}).get("update", 0))
-            self.best_eval = float(payload.get("extra_state", {}).get("best_eval", 0.0))
+            extra = payload.get("extra_state", {})
+            self.update_index = int(extra.get("update", 0))
+            self.best_eval = float(extra.get("best_eval", 0.0))
             self.run_id = str(payload.get("run_id") or self.run_id)
+            if self.curriculum is not None and extra.get("curriculum"):
+                self.curriculum.load_state_dict(extra["curriculum"])
+                self.current_difficulty = self.curriculum.difficulty
+                self.outcomes.extend(
+                    int(value) for value in extra.get("recent_outcomes", [])
+                )
+                self.entropy_coef = float(
+                    extra.get("entropy_coef", self.config.entropy_coef)
+                )
 
     def _reset_env(self, index: int) -> None:
         seed = training_seed(self.total_episodes + index, run_seed=self.config.seed)
@@ -281,8 +328,8 @@ class PPOBackend:
             "ci_high": result.ci_high,
         }
 
-    def _save(self, evaluation: dict | None = None) -> None:
-        extra = {"update": self.update_index, "best_eval": self.best_eval}
+    def _save(self, evaluation: dict | None = None, *, publish: bool = False) -> None:
+        extra = self._extra_state()
         last_path = self.run_dir / "last.pt"
         last_manifest = save_checkpoint(
             last_path,
@@ -297,12 +344,14 @@ class PPOBackend:
             best_eval={"win_rate": self.best_eval},
             extra_state=extra,
         )
-        emit_checkpoint(
-            self.run_dir,
-            source=last_path,
-            manifest=last_manifest,
-            role="last",
-        )
+        if publish or self.curriculum is None:
+            role = "curriculum-complete" if publish and self.curriculum else "last"
+            emit_checkpoint(
+                self.run_dir,
+                source=last_path,
+                manifest=last_manifest,
+                role=role,
+            )
         if evaluation and evaluation["win_rate"] >= self.best_eval:
             self.best_eval = float(evaluation["win_rate"])
             extra["best_eval"] = self.best_eval
@@ -320,12 +369,68 @@ class PPOBackend:
                 best_eval=evaluation,
                 extra_state=extra,
             )
-            emit_checkpoint(
-                self.run_dir,
-                source=best_path,
-                manifest=best_manifest,
-                role="best",
-            )
+            if publish or self.curriculum is None:
+                emit_checkpoint(
+                    self.run_dir,
+                    source=best_path,
+                    manifest=best_manifest,
+                    role="best",
+                )
+
+    def _update_curriculum_entropy(self) -> None:
+        if self.curriculum is None or not self.curriculum.transitions:
+            return
+        fraction = min(
+            1.0,
+            self.curriculum.stage_updates
+            / self.config.curriculum_entropy_decay_updates,
+        )
+        restart = self.config.curriculum_entropy_restart
+        self.entropy_coef = restart + (self.config.entropy_coef - restart) * fraction
+
+    def _record_transition(self, transition: dict) -> None:
+        record = {
+            "time": time.time(),
+            "run_id": self.run_id,
+            **transition,
+        }
+        append_event(self.run_dir / "curriculum.jsonl", record)
+        append_event(
+            self.run_dir / "events.jsonl",
+            {
+                "version": 1,
+                "type": "curriculum",
+                "run_id": self.run_id,
+                "time": record["time"],
+                "payload": transition,
+            },
+        )
+
+    def _promote(self) -> None:
+        assert self.curriculum is not None
+        self.current_difficulty = self.curriculum.difficulty
+        self.best_eval = 0.0
+        self.outcomes.clear()
+        self.optimizer = self._new_optimizer()
+        self.entropy_coef = self.config.curriculum_entropy_restart
+        self._configure_envs()
+
+    def _observe_curriculum(self, train_win_rate: float) -> dict | None:
+        if self.curriculum is None:
+            return None
+        transition = self.curriculum.observe(
+            win_rate=train_win_rate,
+            games=len(self.outcomes),
+            global_update=self.update_index,
+            episode=self.total_episodes,
+        )
+        if transition is None:
+            return None
+        self._record_transition(transition)
+        if transition["type"] == "promotion":
+            self._promote()
+        self._save(publish=transition["type"] == "complete")
+        return transition
 
     def _record_metrics(self, metrics: dict) -> None:
         with (self.run_dir / "metrics.jsonl").open("a", encoding="utf-8") as handle:
@@ -338,6 +443,8 @@ class PPOBackend:
         )
 
     def train_update(self) -> dict:
+        self._update_curriculum_entropy()
+        stage_difficulty = self.current_difficulty
         rollout = self._collect_rollout()
         loss = self._optimize(rollout)
         self.update_index += 1
@@ -353,11 +460,21 @@ class PPOBackend:
         if self.update_index % self.config.checkpoint_every == 0 or evaluation:
             self._save(evaluation)
         train_win_rate = sum(self.outcomes) / len(self.outcomes) if self.outcomes else 0.0
+        transition = self._observe_curriculum(train_win_rate)
+        complete = bool(self.curriculum and self.curriculum.complete)
         metrics = {
             "time": time.time(),
             "update": self.update_index,
             "episodes": self.total_episodes,
             "steps": self.total_steps,
+            "difficulty": stage_difficulty,
+            "current_difficulty": self.current_difficulty,
+            "stage_update": (
+                None if self.curriculum is None else self.curriculum.stage_updates
+            ),
+            "curriculum_complete": complete,
+            "transition": transition,
+            "entropy_coef": self.entropy_coef,
             "train_win_rate": train_win_rate,
             "loss": loss,
             "eval": evaluation,
@@ -366,8 +483,13 @@ class PPOBackend:
         return {
             "episodes": int(rollout["episodes"]),
             "steps": steps,
+            "difficulty": self.current_difficulty,
+            "stage_update": metrics["stage_update"],
+            "curriculum_complete": complete,
+            "transition": transition,
             "train_win_rate": train_win_rate,
             "loss": loss,
+            "complete": complete,
         }
 
     def apply_live_config(self, values: dict) -> None:
