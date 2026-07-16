@@ -225,3 +225,17 @@ $env:MODEL_STORAGE_DIR = "storage/models"
 - legal-mask 수정 strict까지 35%에 실패해 STOP을 확정했다. production curriculum과 M7은 시작하지 않는다.
 - 실패 runtime checkpoint는 배포하지 않고 정리한다. 세부 근거는
   docs/M6_R5_설계.md와 docs/M6_Expert_블로커.md가 단일 출처다.
+
+## 2026-07-17 A 구성 안전 경량화
+
+- 모델·checkpoint·optimizer·RNG·metrics·DB는 변경하지 않았다.
+- __pycache__/.pyc와 tool cache 1,835개(39,639,535 bytes)를 삭제했다.
+- 비활성 .out/.err/PID 52개(124,721 bytes)를 삭제하고 실행 중인
+  m6-r4 대시보드 runtime 파일 5개는 보존했다.
+- SHA-256이 동일한 venv 파일 2그룹을 NTFS hardlink로 통합해 물리 공간
+  6,140,587 bytes를 추가 절감했다.
+- 논리 용량은 4,531,235,329 bytes에서 4,491,471,073 bytes로 감소했고,
+  계산상 총 물리 절감량은 45,904,843 bytes다.
+- PyTorch 2.6.0+cu124, CUDA 12.4, RTX 4060 인식, dashboard HTTP 200,
+  server pytest 86 passed를 확인했다.
+- m6-r4/bootstrap.pt와 M4 validated checkpoint SHA-256은 정리 전후 동일하다.
