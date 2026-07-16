@@ -1,7 +1,7 @@
 # M6 Expert 수렴 블로커
 
 **갱신일**: 2026-07-16
-**상태**: PAUSED - R4-1 통과, R4-2 두 번째 production 재개 대기
+**상태**: RUNNING - R4-2 두 번째 production Expert 학습 중
 
 ## 증상
 
@@ -61,6 +61,14 @@ near-greedy rollout을 강화한다. 40% 게이트와 seed/game 수는 변경하
 컴퓨터 업데이트 전 update 43, Intermediate stage update 25,
 현재 창 승률 75.19%에서 정상 중단했다. NaN/OOM/worker 오류는 없고
 storage/runs/m6-r4/last.pt와 manifest를 보존했으므로 동일 run에서 재개한다.
+
+재개 시 CUDA+AMP를 유지하고 BLAS/OpenMP thread를 1개로 제한했으며,
+dashboard auto-reload를 끄고 live board를 1개로 줄였다. worker CPU는 실측
+0.93 core, RAM 1.98GB, Expert VRAM은 약 5.5GB였다.
+
+- Intermediate: update 116, rolling 500게임 75.0%로 Expert 승급.
+- Expert update 150 smoke: 7/32 = 21.875%.
+- 첫 시도 update 200 smoke 3/32보다 개선됐지만 40% 게이트는 아직 미달이다.
 ## 불변식
 
 - Expert 40% 게이트와 seed/game 수를 낮추지 않았다.

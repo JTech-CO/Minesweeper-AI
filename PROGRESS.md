@@ -2,7 +2,7 @@
 
 **갱신일**: 2026-07-16
 **현재 phase**: M6 진행 중
-**상태**: PAUSED - 컴퓨터 업데이트 전 M6-R4 production curriculum 정상 중단
+**상태**: RUNNING - resource-limited CUDA M6-R4 Expert production 학습 중
 
 ## 현재 결론
 
@@ -13,9 +13,9 @@ Expert CI 하한이 이전 R2-B 13.6%를 상회했고 모든 출력 head의 bit-
 
 두 번째 R4-2 production은 action temperature 0.25, teacher KL 0.10,
 learning rate 5e-6, 분리 mine auxiliary 0.01, AMP, 25% rehearsal을 적용했다.
-Beginner는 update 18에서 rolling 500게임 94.8%로 승급했다. 컴퓨터 업데이트 전
-update 43, Intermediate stage update 25, 현재 창 승률 75.19%에서 오류 없이
-정상 중단했으며 storage/runs/m6-r4/last.pt에서 재개할 수 있다.
+Beginner는 update 18에서 rolling 500게임 94.8%로 승급했다. 재개 후 Intermediate는
+update 116에서 rolling 500게임 75.0%로 Expert에 승급했다. Expert update 150
+smoke는 7/32(21.875%)이며 production worker는 계속 실행 중이다.
 
 M4-R2-B와 기존 M6 실패 계보는 docs/M4_R2_블로커.md,
 docs/M6_Expert_블로커.md가 단일 출처다.
@@ -138,15 +138,17 @@ $env:MODEL_STORAGE_DIR = "storage/models"
   - 두 번째 시도는 action temperature 0.25, teacher KL 0.10,
     mine auxiliary 0.01, learning rate 5e-6, base entropy 0.0.
   - Beginner update 18에서 500게임 94.8%로 Intermediate 승급.
-  - update 43, Intermediate stage update 25, 현재 창 승률 75.19%에서
-    컴퓨터 업데이트를 위해 정상 중단. last.pt와 manifest 보존, 오류 없음.
+  - update 116에서 Intermediate 500게임 75.0%로 Expert 승급.
+  - Expert update 150 smoke 7/32(21.875%): 첫 시도의 3/32보다 개선.
+  - CUDA+AMP, BLAS/OpenMP thread 1개, BelowNormal priority, dashboard no-reload,
+    live board 1개로 실행. 실측 worker CPU 0.93 core, RAM 1.98GB,
+    Expert VRAM 약 5.5GB이며 오류 없음.
 - 검증: server pytest 75 passed, Ruff green, core vitest 40 passed,
   TypeScript typecheck 및 workspace lint green.
 ## 다음 작업
 
-컴퓨터 업데이트 후 storage/runs/m6-r4/last.pt에서 두 번째 R4-2 production을 재개한다.
-Intermediate 60% 게이트와 Expert 40%/500게임/3회 게이트를 통과하기 전에는
-M6를 완료 처리하거나 M7로 진행하지 않는다.
+두 번째 R4-2 production의 Expert 40%/500게임/3회 게이트를 계속 관찰한다.
+게이트를 통과하기 전에는 M6를 완료 처리하거나 M7로 진행하지 않는다.
 
 ## 불변식
 
