@@ -36,17 +36,20 @@ class TeacherDataset(Dataset):
     def __getitem__(self, index: int) -> dict[str, torch.Tensor]:
         sample = self.samples[index]
         return {
-            "state": torch.from_numpy(sample.state),
+            "state": torch.from_numpy(sample.state).float(),
             "legal_mask": torch.from_numpy(sample.legal_mask),
-            "policy_target": torch.from_numpy(sample.policy_target),
-            "risk_target": torch.from_numpy(sample.risk_target),
-            "mine_target": torch.from_numpy(sample.mine_target),
-            "certainty_target": torch.from_numpy(sample.certainty_target),
+            "policy_target": torch.from_numpy(sample.policy_target).float(),
+            "risk_target": torch.from_numpy(sample.risk_target).float(),
+            "mine_target": torch.from_numpy(sample.mine_target).float(),
+            "certainty_target": torch.from_numpy(sample.certainty_target).long(),
             "value_target": torch.tensor(sample.value_target, dtype=torch.float32),
         }
 
 
-def _targets(env: MinesweeperEnv, step: dict) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def targets_from_solver_step(
+    env: MinesweeperEnv,
+    step: dict,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     legal = env.legal_action_mask().astype(bool)
     safe = {int(cell) for cell in step["safe"] if legal[int(cell)]}
     mines = {int(cell) for cell in step["mines"] if legal[int(cell)]}
@@ -100,7 +103,7 @@ def generate_teacher_episode(
     while env.status == "playing" and len(samples) < limit:
         view = view_from_arrays(rows, cols, mines, env.revealed, env.adjacent, env.flagged)
         decision = solve_step(view)
-        policy, risk, certainty = _targets(env, decision)
+        policy, risk, certainty = targets_from_solver_step(env, decision)
         legal = env.legal_action_mask()
         if not np.any(policy):
             break

@@ -2,7 +2,7 @@
 
 **갱신일**: 2026-07-16
 **현재 phase**: M6 진행 중
-**상태**: RUNNING - resource-limited CUDA M6-R4 Expert production 학습 중
+**상태**: BLOCKED - M6 Expert 40% 게이트, 세 가지 R4 방법 실패 후 STOP
 
 ## 현재 결론
 
@@ -13,9 +13,10 @@ Expert CI 하한이 이전 R2-B 13.6%를 상회했고 모든 출력 head의 bit-
 
 두 번째 R4-2 production은 action temperature 0.25, teacher KL 0.10,
 learning rate 5e-6, 분리 mine auxiliary 0.01, AMP, 25% rehearsal을 적용했다.
-Beginner는 update 18에서 rolling 500게임 94.8%로 승급했다. 재개 후 Intermediate는
-update 116에서 rolling 500게임 75.0%로 Expert에 승급했다. Expert update 150
-smoke는 7/32(21.875%)이며 production worker는 계속 실행 중이다.
+Beginner는 update 18에서 rolling 500게임 94.8%로 승급했고 Intermediate는
+update 116에서 rolling 500게임 75.0%로 Expert에 승급했다. 두 번째 R4-2는
+update 600 rolling 25.6%, smoke 8/32(25.0%)로 정체되어 update 604에서 중단했다.
+R4-3 DAgger도 최종 Expert smoke 7/32(21.875%)로 실패했다.
 
 M4-R2-B와 기존 M6 실패 계보는 docs/M4_R2_블로커.md,
 docs/M6_Expert_블로커.md가 단일 출처다.
@@ -140,15 +141,22 @@ $env:MODEL_STORAGE_DIR = "storage/models"
   - Beginner update 18에서 500게임 94.8%로 Intermediate 승급.
   - update 116에서 Intermediate 500게임 75.0%로 Expert 승급.
   - Expert update 150 smoke 7/32(21.875%): 첫 시도의 3/32보다 개선.
-  - CUDA+AMP, BLAS/OpenMP thread 1개, BelowNormal priority, dashboard no-reload,
-    live board 1개로 실행. 실측 worker CPU 0.93 core, RAM 1.98GB,
-    Expert VRAM 약 5.5GB이며 오류 없음.
-- 검증: server pytest 75 passed, Ruff green, core vitest 40 passed,
+  - CUDA+AMP, BLAS/OpenMP thread 1개, dashboard no-reload, live board 1개로 실행.
+  - update 600 rolling 500게임 25.6%, smoke 8/32(25.0%).
+  - update 604 rolling 25.8%에서 정상 중단. NaN/OOM 없음.
+- R4-3:
+  - exact solver-only Expert smoke 17/32(53.125%)로 teacher ceiling 확인.
+  - policy 방문 상태 12,000개씩 2 rounds를 solver로 재라벨링한 DAgger 구현.
+  - round 1 Expert 6/32(18.75%), round 2 Expert 7/32(21.875%).
+  - final posterior Brier 0.002164, NLL 0.414180, certain-safe precision 98.76%.
+  - Beginner 30/32, Intermediate 24/32는 유지했지만 Expert 40% 미달.
+- 검증: server pytest 77 passed, Ruff green, core vitest 40 passed,
   TypeScript typecheck 및 workspace lint green.
 ## 다음 작업
 
-두 번째 R4-2 production의 Expert 40%/500게임/3회 게이트를 계속 관찰한다.
-게이트를 통과하기 전에는 M6를 완료 처리하거나 M7로 진행하지 않는다.
+서로 다른 R4 방법 3개가 실패했으므로 STOP한다. 새로운 M6-R5 아키텍처 또는
+제품 목표/게이트 변경은 사용자 명시 승인 전에는 진행하지 않는다. M6를 완료
+처리하거나 M7로 진행하지 않는다.
 
 ## 불변식
 

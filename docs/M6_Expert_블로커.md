@@ -1,7 +1,7 @@
 # M6 Expert 수렴 블로커
 
 **갱신일**: 2026-07-16
-**상태**: RUNNING - R4-2 두 번째 production Expert 학습 중
+**상태**: BLOCKED - R4-2와 R4-3 실패, 세 방법 이후 STOP
 
 ## 증상
 
@@ -60,7 +60,7 @@ near-greedy rollout을 강화한다. 40% 게이트와 seed/game 수는 변경하
 두 번째 시도는 Beginner를 update 18, rolling 500게임 94.8%로 통과했다.
 컴퓨터 업데이트 전 update 43, Intermediate stage update 25,
 현재 창 승률 75.19%에서 정상 중단했다. NaN/OOM/worker 오류는 없고
-storage/runs/m6-r4/last.pt와 manifest를 보존했으므로 동일 run에서 재개한다.
+storage/runs/m6-r4/last.pt와 manifest를 보존해 동일 run에서 재개했다.
 
 재개 시 CUDA+AMP를 유지하고 BLAS/OpenMP thread를 1개로 제한했으며,
 dashboard auto-reload를 끄고 live board를 1개로 줄였다. worker CPU는 실측
@@ -69,6 +69,32 @@ dashboard auto-reload를 끄고 live board를 1개로 줄였다. worker CPU는 �
 - Intermediate: update 116, rolling 500게임 75.0%로 Expert 승급.
 - Expert update 150 smoke: 7/32 = 21.875%.
 - 첫 시도 update 200 smoke 3/32보다 개선됐지만 40% 게이트는 아직 미달이다.
+## M6-R4-2 최종 판정
+
+- update 500: rolling 20.8%, smoke 7/32 = 21.875%.
+- update 550: rolling 23.0%, smoke 5/32 = 15.625%.
+- update 600: rolling 25.6%, smoke 8/32 = 25.0%.
+- update 604: rolling 25.8%, NaN/OOM 없이 정상 중단.
+
+## M6-R4-3 DAgger 최종 시도
+
+Exact solver-only는 같은 Expert smoke에서 17/32 = 53.125%를 기록했다.
+문제는 solver 상한이 아니라 solver trajectory teacher와 model 방문 상태의
+distribution shift로 판단했다. 모델이 실제 방문한 Expert 상태를 round당
+12,000개 수집하고 solver로 재라벨링하되 solver 출력은 inference 입력으로
+사용하지 않는 DAgger 경로를 구현했다.
+
+- Round 1: Expert 6/32 = 18.75%, Beginner 30/32, Intermediate 25/32.
+- Round 2: Expert 7/32 = 21.875%, Beginner 30/32, Intermediate 24/32.
+- Final held-out posterior: Brier 0.002164, NLL 0.414180,
+  certain-safe precision 98.76%.
+- policy loss는 각 round 안에서 감소했지만 Expert action ranking으로 전이되지 않았다.
+- failed bootstrap-dagger checkpoint는 발행하지 않고 삭제한다.
+
+R4-2 첫 production, 보존 강화 production, DAgger라는 서로 다른 세 방법이
+Expert 40% 게이트를 통과하지 못했다. 설계 문서의 STOP 조건에 따라 추가 반복을
+중단하며 새로운 대규모 아키텍처나 게이트 변경은 사용자 승인 없이는 진행하지 않는다.
+
 ## 불변식
 
 - Expert 40% 게이트와 seed/game 수를 낮추지 않았다.
