@@ -219,11 +219,10 @@ class ConstraintPosteriorPolicyNet(nn.Module):
         ) / 8.0
         return hidden, clue, features * clue
 
-    def forward(
+    def _features(
         self,
         x: torch.Tensor,
-        legal_mask: torch.Tensor | None = None,
-    ) -> dict[str, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         valid = x[:, VALID_CHANNEL : VALID_CHANNEL + 1]
         hidden, clue, clue_features = self._visible_constraint_features(x, valid)
         h = F.silu(self.stem_norm(self.stem_conv(x), valid)) * valid
@@ -235,6 +234,14 @@ class ConstraintPosteriorPolicyNet(nn.Module):
         denom = valid.sum(dim=(2, 3), keepdim=True).clamp_min(1.0)
         pooled = (h * valid).sum(dim=(2, 3), keepdim=True) / denom
         h = F.silu(h + self.global_proj(pooled)) * valid
+        return h, pooled, valid
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        legal_mask: torch.Tensor | None = None,
+    ) -> dict[str, torch.Tensor]:
+        h, pooled, valid = self._features(x)
         posterior_map = self.posterior_head(h) * valid
         mine_map = self.mine_head(h) * valid
         preference = self.preference_head(h)

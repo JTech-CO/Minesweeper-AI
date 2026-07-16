@@ -14,6 +14,7 @@ Architecture = Literal[
     "axial-v3",
     "constraint-graph-v4",
     "constraint-posterior-v5",
+    "constraint-ranker-v6",
 ]
 
 
@@ -61,6 +62,7 @@ class ExperimentConfig:
             "axial-v3",
             "constraint-graph-v4",
             "constraint-posterior-v5",
+            "constraint-ranker-v6",
         }:
             raise ValueError(f"unsupported architecture {self.architecture!r}")
         if self.graph_rounds < 0:

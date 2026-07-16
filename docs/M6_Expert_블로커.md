@@ -108,3 +108,39 @@ Expert 40% 게이트를 통과하지 못했다. 설계 문서의 STOP 조건에 
 다음 단계는 Expert 전용 posterior/constraint 표현과 solver distillation을 포함하는
 새 정책 아키텍처가 필요하다. 이는 하네스의 큰 아키텍처 변경에 해당하므로 사용자
 승인 후 docs/M6_R4_설계제안.md의 고정 계약과 게이트로 별도 M6-R4를 진행한다.
+
+## M6-R5 constraint-ranker-v6 STOP
+
+사용자 승인 후 v5의 certainty head를 실제 정책 순위에 연결하는 v6와 행동 중심
+ranking loss를 구현했다. hidden mine independence, inference solver 금지,
+padding invariance, strict priority, v5 transfer, bit-identical reload 테스트를
+추가했다.
+
+고정 결과:
+
+- certainty-only 기준: Expert 55/200 = 27.5%.
+- soft combined rank 소규모: 62/200 = 31.0%.
+- soft combined rank 중간 규모: 61/200 = 30.5%.
+- certainty/guess 분리 rank: smoke 10/32, tail 지표 비개선.
+- strict class rank 최종: smoke 11/32, canonical 54/200 = 27.0%.
+- strict 최종 Wilson 95% CI: 21.32-33.54%.
+- R5-1 production 진입 게이트: 70/200 = 35%, 미달.
+
+평균 posterior Brier와 training loss 감소가 full-game top-1 tail 오류 감소로
+이어지지 않았다. 특히 strict ranker의 held-out top-1 mine rate가 0.39%에서
+0.78%로 악화됐다. 세 방법 실패로 STOP하며 M6 40% 게이트와 M7 순서는
+변경하지 않는다.
+### R5 legal-mask 정정
+
+분리 guess objective가 revealed/padded posterior 셀을 softmax 정규화에 포함한
+결함이 최종 검토에서 발견됐다. 방법 2와 strict 방법의 기존 수치는 무효화하며,
+legal-mask 회귀를 추가한 strict ranker 최종 재검증 전에는 STOP을 확정하지 않는다.
+### R5 legal-mask 수정 후 유효 최종 결과
+
+- illegal/revealed/padded posterior를 softmax에서 제외하는 회귀를 추가했다.
+- strict baseline smoke: 5/32 = 15.625%.
+- 수정 후 학습 smoke: 8/32 = 25.0%.
+- 유효 checkpoint: 92c222c5e03043c3aa82b3d77a42fb69.
+- canonical validation: 44/200 = 22.0%.
+- Wilson 95% CI: 16.82-28.24%.
+- R5-1 35%와 M6 40% 게이트 모두 미달해 STOP을 확정했다.

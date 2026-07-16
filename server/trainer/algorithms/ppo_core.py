@@ -80,12 +80,15 @@ class PPOBackend:
         )
 
     def _load_teacher_anchor(self) -> None:
-        if self.config.architecture != "constraint-posterior-v5":
+        if self.config.architecture not in {
+            "constraint-posterior-v5",
+            "constraint-ranker-v6",
+        }:
             return
         bootstrap = self.run_dir / "bootstrap.pt"
         if not bootstrap.exists():
             raise FileNotFoundError(
-                "constraint-posterior-v5 requires run_dir/bootstrap.pt"
+                f"{self.config.architecture} requires run_dir/bootstrap.pt"
             )
         anchor = build_policy_model(
             self.config.to_dict() | {"input_channels": NUM_CHANNELS_V3}

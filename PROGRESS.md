@@ -2,7 +2,7 @@
 
 **갱신일**: 2026-07-16
 **현재 phase**: M6 진행 중
-**상태**: BLOCKED - M6 Expert 40% 게이트, 세 가지 R4 방법 실패 후 STOP
+**상태**: BLOCKED - M6 Expert 40% 게이트, R4와 유효 R5 방법 실패 후 STOP
 
 ## 현재 결론
 
@@ -208,3 +208,20 @@ $env:MODEL_STORAGE_DIR = "storage/models"
 - 실패한 임시 가중치 67.96 MiB와 33.98 MiB를 각각 제거했으며 기존 M6 best/last와 metrics는 보존했다.
 - 상세 증상, 시도, 결과, 가설은 docs/M6_Expert_블로커.md가 단일 출처다.
 - 하네스 STOP 규칙에 따라 M6-R4 아키텍처 변경 승인 전에는 M7로 진행하지 않는다.
+
+## 2026-07-16 M6-R5 STOP
+
+- 사용자 승인으로 constraint-ranker-v6, v5 완전 전이, ranking-aware loss,
+  tail-error metrics, on-policy CUDA distillation 경로를 구현했다.
+- 계약: hidden mine independence, inference solver 금지, mixed-size padding,
+  strict class priority, bounded preference, bit-identical reload.
+- certainty-only Expert 기준은 55/200 = 27.5%였다.
+- soft combined rank는 소규모 62/200 = 31.0%, 중간 규모 61/200 = 30.5%.
+- certainty/guess 분리 rank는 smoke 10/32로 tail 지표를 개선하지 못했다.
+- strict class rank의 최초 수치는 legal-mask 결함으로 무효화했다.
+- 수정된 유효 checkpoint는 smoke 8/32, canonical 44/200 = 22.0%
+  (Wilson 95% CI 16.82-28.24%)였다.
+- R5-1 진입 게이트 35%와 M6 최종 40% 게이트에 실패했다.
+- legal-mask 수정 strict까지 35%에 실패해 STOP을 확정했다. production curriculum과 M7은 시작하지 않는다.
+- 실패 runtime checkpoint는 배포하지 않고 정리한다. 세부 근거는
+  docs/M6_R5_설계.md와 docs/M6_Expert_블로커.md가 단일 출처다.
