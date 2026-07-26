@@ -1,6 +1,6 @@
 # Minesweeper AI 진행 상태
 
-**갱신일**: 2026-07-16
+**갱신일**: 2026-07-26
 **현재 phase**: M6 진행 중
 **상태**: BLOCKED - M6 Expert 40% 게이트, R4와 유효 R5 방법 실패 후 STOP
 
@@ -239,3 +239,18 @@ $env:MODEL_STORAGE_DIR = "storage/models"
 - PyTorch 2.6.0+cu124, CUDA 12.4, RTX 4060 인식, dashboard HTTP 200,
   server pytest 86 passed를 확인했다.
 - m6-r4/bootstrap.pt와 M4 validated checkpoint SHA-256은 정리 전후 동일하다.
+
+## 2026-07-26 C 구성 `.venv` 외부화
+
+- 외부화 전 Git 업로드 가능 파일을 `codex/m6-m10`에 푸시했다.
+- `server/.venv`의 실제 7,742개 파일, 3,959,003,910 bytes를
+  `C:\Users\MSI\minesweeper-ai-runtime\server-venv`로 같은 볼륨 안에서
+  이동하고, 기존 경로에는 NTFS junction을 생성했다.
+- 기존 Python·배치파일 경로는 바뀌지 않으며 프로젝트 내부 표시 용량은
+  약 4.49 GB에서 531,746,623 bytes(약 0.532 GB)로 감소했다.
+- 외부화는 삭제나 압축이 아니므로 C: 전체 사용량은 줄지 않았고 모델,
+  checkpoint, optimizer, RNG, metrics, DB는 변경하지 않았다.
+- PyTorch 2.6.0+cu124, CUDA 12.4, RTX 4060 인식, hardlink File ID 유지,
+  server pytest 86 passed, 임시 dashboard HTTP 200을 확인했다.
+- m6-r4/bootstrap.pt SHA-256 `293e0da26d7a...`와 M4 validated SHA-256
+  `d5afc601a312...`는 외부화 전후 동일하다.
